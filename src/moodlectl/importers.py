@@ -3,6 +3,7 @@
 APICe Course/Iag2627M2's Slides view is one supported use case; the importer
 requires an actual table containing the requested named columns.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -23,7 +24,8 @@ def parse_link_table(
     source_url: str,
     course: int,
     section: str | int,
-    *, title_column: str = "Lecture",
+    *,
+    title_column: str = "Lecture",
     pdf_column: str = "PDF",
     online_column: str = "Online slides",
 ) -> Batch:
@@ -34,8 +36,10 @@ def parse_link_table(
         first_row = table.find("tr")
         if not first_row:
             continue
-        header_names = [" ".join(cell.stripped_strings).casefold()
-                        for cell in first_row.find_all(["th", "td"], recursive=False)]
+        header_names = [
+            " ".join(cell.stripped_strings).casefold()
+            for cell in first_row.find_all(["th", "td"], recursive=False)
+        ]
         if not all(item in header_names for item in expected):
             continue
         index = [header_names.index(item) for item in expected]
@@ -50,14 +54,17 @@ def parse_link_table(
             online_anchor = online_cell.find("a", href=True)
             if not name or not pdf_anchor or not online_anchor:
                 continue
-            pdf = urljoin(source_url, pdf_anchor["href"])
-            online = urljoin(source_url, online_anchor["href"])
+            pdf = urljoin(source_url, str(pdf_anchor["href"]))
+            online = urljoin(source_url, str(online_anchor["href"]))
             if any(urlsplit(url).scheme not in ("http", "https") for url in (pdf, online)):
                 raise moodlectlError(f"Row {name!r}: unsupported link scheme")
             spec = ResourceSpec(
-                kind="url", name=name, url=pdf,
+                kind="url",
+                name=name,
+                url=pdf,
                 description=f"[Online slides (rolling)]({online})",
-                description_format="markdown", show_description=True,
+                description_format="markdown",
+                show_description=True,
             )
             spec.validate()
             resources.append(spec)

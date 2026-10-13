@@ -17,9 +17,11 @@ def test_example_manifest():
 
 def test_duplicate_rejected(tmp_path):
     path = tmp_path / "manifest.yaml"
-    path.write_text('course: 2\nsection: 1\nresources:\n'
-                    ' - {kind: url, name: Test, url: "https://a.org"}\n'
-                    ' - {kind: url, name: test, url: "https://b.org"}\n')
+    path.write_text(
+        "course: 2\nsection: 1\nresources:\n"
+        ' - {kind: url, name: Test, url: "https://a.org"}\n'
+        ' - {kind: url, name: test, url: "https://b.org"}\n'
+    )
     with pytest.raises(moodlectlError, match="Duplicate"):
         load_manifest(path)
 

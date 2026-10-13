@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from contextlib import AbstractContextManager
-from dataclasses import replace
 from urllib.parse import parse_qs, urlencode, urlsplit
 from typing import Any
 
@@ -126,12 +125,14 @@ class BrowserMoodle(AbstractContextManager):
         print("Complete the University's SSO/MFA login in the opened Chromium window.")
         input("When the authenticated Moodle page is visible, press Enter here: ")
         # Recheck a protected route; do not persist passwords or request tokens.
-        self._goto("/my/courses.php")
-        if self.page.locator('body.notloggedin, #page-login-index').count():
+        p = self._goto("/my/courses.php")
+        if p.locator("body.notloggedin, #page-login-index").count():
             raise LoginRequired("Moodle does not report an authenticated account")
 
     def list_courses(self, search: str | None = None) -> list[Course]:
-        path = "/course/search.php?" + urlencode({"search": search}) if search else "/my/courses.php"
+        path = (
+            "/course/search.php?" + urlencode({"search": search}) if search else "/my/courses.php"
+        )
         p = self._goto(path)
         raw = p.eval_on_selector_all(
             'a[href*="/course/view.php?id="]',
@@ -156,10 +157,15 @@ class BrowserMoodle(AbstractContextManager):
         raw: list[dict] = p.evaluate(SECTION_JS)
         if not raw:
             raise moodlectlError("Cannot find Moodle course sections; check course access/layout")
-        return [Section(
-            number=s["number"], name=s["name"], section_id=s["section_id"],
-            resources=tuple(Resource(**r) for r in s["resources"]),
-        ) for s in raw]
+        return [
+            Section(
+                number=s["number"],
+                name=s["name"],
+                section_id=s["section_id"],
+                resources=tuple(Resource(**r) for r in s["resources"]),
+            )
+            for s in raw
+        ]
 
     def select_section(self, course_id: int, selector: str | int) -> Section:
         sections = self.course_sections(course_id)
@@ -171,7 +177,7 @@ class BrowserMoodle(AbstractContextManager):
         if not hits:
             raise moodlectlError(
                 f"Section {selector!r} not found in course {course_id}. "
-                f"Available: {[(s.number,s.name) for s in sections]}"
+                f"Available: {[(s.number, s.name) for s in sections]}"
             )
         if len(hits) > 1:
             raise AmbiguousMatch(f"Section selector {selector!r} matched multiple sections")
@@ -180,19 +186,34 @@ class BrowserMoodle(AbstractContextManager):
     def list_resources(self, course_id: int, section: str | int | None = None) -> list[Resource]:
         if section is not None:
             return list(self.select_section(course_id, section).resources)
-        return [resource for section in self.course_sections(course_id) for resource in section.resources]
+        return [
+            resource
+            for section in self.course_sections(course_id)
+            for resource in section.resources
+        ]
 
-    def _edit_form(self, *, course_id: int | None = None, section_no: int | None = None,
-                   kind: str = "url", cmid: int | None = None) -> Page:
+    def _edit_form(
+        self,
+        *,
+        course_id: int | None = None,
+        section_no: int | None = None,
+        kind: str = "url",
+        cmid: int | None = None,
+    ) -> Page:
         if cmid is not None:
             path = "/course/modedit.php?" + urlencode({"update": cmid, "return": 0})
         else:
             if course_id is None or section_no is None:
                 raise moodlectlError("course_id and section_no required for creation")
-            path = "/course/modedit.php?" + urlencode({
-                "add": kind, "course": course_id, "section": section_no,
-                "return": 0, "beforemod": 0,
-            })
+            path = "/course/modedit.php?" + urlencode(
+                {
+                    "add": kind,
+                    "course": course_id,
+                    "section": section_no,
+                    "return": 0,
+                    "beforemod": 0,
+                }
+            )
             # Moodle's `type` parameter is optional; choose generic module type.
         p = self._goto(path)
         if not p.locator("form#mform1, form:has(#id_name)").count():
@@ -221,6 +242,8 @@ class BrowserMoodle(AbstractContextManager):
             return
         # Standard Moodle FORMAT_* constants: 0=Moodle, 1=HTML, 2=plain, 4=Markdown.
         format_values = {"auto": "0", "html": "1", "plain": "2", "markdown": "4"}
+        if fmt not in format_values:
+            raise moodlectlError(f"Invalid description format: {fmt!r}")
         value = format_values[fmt]
         if value not in loc.locator("option").evaluate_all("els => els.map(e => e.value)"):
             raise MoodleFormError(f"Formatting type {fmt} not offered by this Moodle form")
@@ -266,7 +289,9 @@ class BrowserMoodle(AbstractContextManager):
             loc.fill(text)
             return
         # TinyMCE within editor iframe; scope to form component.
-        frames = p.frame_locator(f'#fitem_id_{field} iframe').locator('body[contenteditable="true"]')
+        frames = p.frame_locator(f"#fitem_id_{field} iframe").locator(
+            'body[contenteditable="true"]'
+        )
         if frames.count():
             frames.first.fill(text)
             return
@@ -292,9 +317,9 @@ class BrowserMoodle(AbstractContextManager):
             desc = self._locate(p, "#id_introeditor")
             desc.fill(spec.description)
         elif not updating:
-            desc = self._optional(p, "#id_introeditor")
-            if desc and desc.is_visible():
-                desc.fill("")
+            blank = self._optional(p, "#id_introeditor")
+            if blank and blank.is_visible():
+                blank.fill("")
         show = self._optional(p, '#id_showdescription, input[name="showdescription"]')
         if show is not None:
             show.check() if spec.show_description else show.uncheck()
@@ -306,29 +331,32 @@ class BrowserMoodle(AbstractContextManager):
             self._fill_field(p, "#id_display", {"label": spec.display})
         if spec.kind == "page":
             self._fill_rich_text(p, "page", spec.content or "")
-        elif spec.kind == "label":
-            self._fill_rich_text(p, "introeditor", spec.content or spec.description)
         for selector, value in spec.fields.items():
             self._fill_field(p, selector, value)
 
     def _save(self, p: Page) -> None:
-        button = self._locate(p, '#id_submitbutton2 || input[name="submitbutton2"] || #id_submitbutton')
+        button = self._locate(
+            p, '#id_submitbutton2 || input[name="submitbutton2"] || #id_submitbutton'
+        )
         button.click()
         try:
             p.wait_for_load_state("domcontentloaded", timeout=self.timeout_ms)
         except PWTimeout as exc:
             raise MoodleFormError("Timed out waiting for Moodle to save") from exc
         if "/course/modedit.php" in p.url:
-            errors = p.locator('.invalid-feedback, .error, .alert-danger, [role="alert"]').all_text_contents()
+            errors = p.locator(
+                '.invalid-feedback, .error, .alert-danger, [role="alert"]'
+            ).all_text_contents()
             raise MoodleFormError(
-                "Moodle did not leave the editing form. Validation errors: " +
-                (" | ".join(dict.fromkeys(e.strip() for e in errors if e.strip())) or "unknown")
+                "Moodle did not leave the editing form. Validation errors: "
+                + (" | ".join(dict.fromkeys(e.strip() for e in errors if e.strip())) or "unknown")
             )
         if urlsplit(p.url).netloc != urlsplit(self.site).netloc:
             raise MoodleFormError(f"Unexpected post-save navigation: {p.url}")
 
-    def add_resource(self, course_id: int, section: str | int, spec: ResourceSpec,
-                     *, if_exists: str = "skip") -> str:
+    def add_resource(
+        self, course_id: int, section: str | int, spec: ResourceSpec, *, if_exists: str = "skip"
+    ) -> str:
         """Create one resource; skip or error if its name+kind already exists.
 
         Section resolution and duplicate detection re-read the current course.
@@ -336,7 +364,11 @@ class BrowserMoodle(AbstractContextManager):
         """
         spec.validate()
         target = self.select_section(course_id, section)
-        existing = [r for r in target.resources if r.name.casefold() == spec.name.casefold() and r.kind == spec.kind]
+        existing = [
+            r
+            for r in target.resources
+            if r.name.casefold() == spec.name.casefold() and r.kind == spec.kind
+        ]
         if existing:
             if if_exists == "skip":
                 return "skipped"
@@ -345,7 +377,10 @@ class BrowserMoodle(AbstractContextManager):
         self._populate(p, spec)
         self._save(p)
         refreshed = self.select_section(course_id, target.number)
-        if not any(r.name.casefold() == spec.name.casefold() and r.kind == spec.kind for r in refreshed.resources):
+        if not any(
+            r.name.casefold() == spec.name.casefold() and r.kind == spec.kind
+            for r in refreshed.resources
+        ):
             raise MoodleFormError(
                 f"Save returned but {spec.name!r} was not found in section {target.name}. "
                 "Inspect the course before retrying."
@@ -356,7 +391,9 @@ class BrowserMoodle(AbstractContextManager):
         """Inspect actual Moodle input/select/textarea controls without submitting."""
         target = self.select_section(course_id, section)
         p = self._edit_form(course_id=course_id, section_no=target.number, kind=kind)
-        return p.locator("form#mform1 input, form#mform1 select, form#mform1 textarea").evaluate_all(
+        return p.locator(
+            "form#mform1 input, form#mform1 select, form#mform1 textarea"
+        ).evaluate_all(
             """els => els.filter(e => e.name || e.id).map(e => ({
               id:e.id, name:e.name, type:e.type,
               options:e.tagName==='SELECT' ? [...e.options].map(o => ({value:o.value,label:o.textContent.trim()})) : null,
@@ -366,7 +403,9 @@ class BrowserMoodle(AbstractContextManager):
 
     def get_url_details(self, course_id: int, cmid: int) -> dict:
         """Read the destination/description from a URL's edit form (teacher role)."""
-        resources = [r for r in self.list_resources(course_id) if r.cmid == cmid and r.kind == "url"]
+        resources = [
+            r for r in self.list_resources(course_id) if r.cmid == cmid and r.kind == "url"
+        ]
         if len(resources) != 1:
             raise moodlectlError(f"URL cmid={cmid} not found in course {course_id}")
         p = self._edit_form(cmid=cmid)
@@ -376,7 +415,8 @@ class BrowserMoodle(AbstractContextManager):
         visible = self._optional(p, "#id_visible")
         display = self._optional(p, "#id_display")
         return {
-            "cmid": cmid, "course": course_id,
+            "cmid": cmid,
+            "course": course_id,
             "name": self._locate(p, "#id_name").input_value(),
             "url": self._locate(p, "#id_externalurl").input_value(),
             "description": desc.input_value() if desc else None,
@@ -386,13 +426,20 @@ class BrowserMoodle(AbstractContextManager):
             "display_value": display.input_value() if display else None,
         }
 
-    def update_url(self, course_id: int, cmid: int, *, name: str | None = None,
-                   url: str | None = None, description: str | None = None,
-                   description_format: str | None = None,
-                   show_description: bool | None = None,
-                   visible: bool | None = None,
-                   display: str | None = None,
-                   fields: dict | None = None) -> None:
+    def update_url(
+        self,
+        course_id: int,
+        cmid: int,
+        *,
+        name: str | None = None,
+        url: str | None = None,
+        description: str | None = None,
+        description_format: str | None = None,
+        show_description: bool | None = None,
+        visible: bool | None = None,
+        display: str | None = None,
+        fields: dict | None = None,
+    ) -> None:
         """Update a URL activity using only the fields explicitly supplied."""
         existing = [r for r in self.list_resources(course_id) if r.cmid == cmid and r.kind == "url"]
         if len(existing) != 1:

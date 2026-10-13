@@ -1,18 +1,16 @@
-from pathlib import Path
-
 import pytest
 
 from moodlectl.errors import moodlectlError
 from moodlectl.importers import parse_link_table, write_manifest
 from moodlectl.manifest import load_manifest
 
-HTML = '''
+HTML = """
 <table><thead><tr><th>Lecture</th><th>PDF</th><th>Online slides</th></tr></thead>
 <tbody><tr><td>0. About the course</td><td><a href="https://example.org/0.pdf">Download PDF</a></td>
 <td><a href="https://example.org/0/">Open slides</a></td></tr>
 <tr><td>1. Intro</td><td><a href="1.pdf">Download PDF</a></td>
 <td><a href="/slides/intro/">Open slides</a></td></tr></tbody></table>
-'''
+"""
 
 
 def test_parse_realistic_table(tmp_path):

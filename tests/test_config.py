@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from moodlectl.config import Settings, normalized_site

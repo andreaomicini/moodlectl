@@ -36,7 +36,9 @@ class MoodleREST:
         self.site = normalized_site(site)
         self.token = token or os.environ.get("MOODLE_WS_TOKEN")
         if not self.token:
-            raise moodlectlError("Set MOODLE_WS_TOKEN (requires a web-service token provisioned by Moodle)")
+            raise moodlectlError(
+                "Set MOODLE_WS_TOKEN (requires a web-service token provisioned by Moodle)"
+            )
         self.http = httpx.Client(timeout=timeout, follow_redirects=False)
 
     def close(self) -> None:
@@ -59,7 +61,8 @@ class MoodleREST:
         }
         try:
             response = self.http.post(
-                f"{self.site}/webservice/rest/server.php", data=data,
+                f"{self.site}/webservice/rest/server.php",
+                data=data,
             )
             response.raise_for_status()
             result = response.json()

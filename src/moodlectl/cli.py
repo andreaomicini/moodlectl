@@ -1,10 +1,11 @@
 """Typer CLI. Run `moodlectl --help` for all commands."""
+
 from __future__ import annotations
 
 import json
 from contextlib import contextmanager
 from dataclasses import asdict
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import typer
 
@@ -13,7 +14,7 @@ from .config import Settings, normalized_site
 from .errors import moodlectlError
 from .manifest import load_manifest
 from .importers import import_table, write_manifest
-from .models import ResourceSpec
+from .models import Format, ResourceSpec
 from .rest import MoodleREST
 
 app = typer.Typer(no_args_is_help=True, help="Moodle resources CLI (browser SSO + REST)")
@@ -72,9 +73,15 @@ def login(ctx: typer.Context):
 @config.command("show")
 def config_show(ctx: typer.Context):
     s = _settings(ctx)
-    _json({"site": s.site, "profile": s.profile,
-           "course_id": s.course_id, "config_path": str(s.path),
-           "browser_dir": str(s.browser_dir)})
+    _json(
+        {
+            "site": s.site,
+            "profile": s.profile,
+            "course_id": s.course_id,
+            "config_path": str(s.path),
+            "browser_dir": str(s.browser_dir),
+        }
+    )
 
 
 @config.command("set-site")
@@ -104,8 +111,17 @@ def courses_use(ctx: typer.Context, course: int):
 @sections.command("list")
 def sections_list(ctx: typer.Context, course: Optional[int] = typer.Option(None, "--course")):
     with browser(ctx) as moodle:
-        _json([{"number": x.number, "name": x.name, "section_id": x.section_id,
-                "resource_count": len(x.resources)} for x in moodle.course_sections(_cid(ctx, course))])
+        _json(
+            [
+                {
+                    "number": x.number,
+                    "name": x.name,
+                    "section_id": x.section_id,
+                    "resource_count": len(x.resources),
+                }
+                for x in moodle.course_sections(_cid(ctx, course))
+            ]
+        )
 
 
 @resources.command("list")
@@ -153,15 +169,24 @@ def add_url(
     show_description: bool = typer.Option(False, "--show-description"),
     hidden: bool = typer.Option(False, "--hidden"),
     display: Optional[str] = typer.Option(None, "--display", help="Moodle display mode label"),
-    fields: str = typer.Option("{}", "--fields", help="JSON mapping extra form selectors to values"),
+    fields: str = typer.Option(
+        "{}", "--fields", help="JSON mapping extra form selectors to values"
+    ),
     if_exists: str = typer.Option("skip", "--if-exists", help="skip or error"),
 ):
     if if_exists not in ("skip", "error"):
         raise moodlectlError("--if-exists supports skip or error")
-    spec = ResourceSpec(kind="url", name=name, url=url, description=description,
-                        description_format=text_format, show_description=show_description,
-                        visible=False if hidden else None, display=display,
-                        fields=_parse_json_object(fields))
+    spec = ResourceSpec(
+        kind="url",
+        name=name,
+        url=url,
+        description=description,
+        description_format=cast(Format, text_format),  # checked by ResourceSpec.validate()
+        show_description=show_description,
+        visible=False if hidden else None,
+        display=display,
+        fields=_parse_json_object(fields),
+    )
     with browser(ctx) as moodle:
         result = moodle.add_resource(_cid(ctx, course), section, spec, if_exists=if_exists)
     typer.echo(f"{result}: {name}")
@@ -178,8 +203,14 @@ def add_page(
     hidden: bool = typer.Option(False, "--hidden"),
     fields: str = typer.Option("{}", "--fields"),
 ):
-    spec = ResourceSpec(kind="page", name=name, content=content, description=description,
-                        visible=False if hidden else None, fields=_parse_json_object(fields))
+    spec = ResourceSpec(
+        kind="page",
+        name=name,
+        content=content,
+        description=description,
+        visible=False if hidden else None,
+        fields=_parse_json_object(fields),
+    )
     with browser(ctx) as moodle:
         result = moodle.add_resource(_cid(ctx, course), section, spec)
     typer.echo(f"{result}: {name}")
@@ -200,10 +231,18 @@ def update_url(
     fields: str = typer.Option("{}", "--fields"),
 ):
     with browser(ctx) as moodle:
-        moodle.update_url(_cid(ctx, course), cmid, name=name, url=url,
-                          description=description, description_format=text_format,
-                          show_description=show_description, visible=visibility,
-                          display=display, fields=_parse_json_object(fields))
+        moodle.update_url(
+            _cid(ctx, course),
+            cmid,
+            name=name,
+            url=url,
+            description=description,
+            description_format=text_format,
+            show_description=show_description,
+            visible=visibility,
+            display=display,
+            fields=_parse_json_object(fields),
+        )
     typer.echo(f"updated: {cmid}")
 
 
@@ -221,7 +260,9 @@ def _parse_json_object(raw: str) -> dict:
 def resources_sync(
     ctx: typer.Context,
     manifest: str = typer.Argument(..., help="YAML manifest to apply"),
-    apply: bool = typer.Option(False, "--apply", help="Actually create resources (default: preview)"),
+    apply: bool = typer.Option(
+        False, "--apply", help="Actually create resources (default: preview)"
+    ),
     if_exists: str = typer.Option("skip", "--if-exists", help="skip or error"),
 ):
     if if_exists not in ("skip", "error"):
@@ -231,15 +272,18 @@ def resources_sync(
         sect = moodle.select_section(batch.course, batch.section)
         existing = {(r.kind, r.name.casefold()) for r in sect.resources}
         plan = [
-            {"kind": spec.kind, "name": spec.name,
-             "action": "exists" if (spec.kind, spec.name.casefold()) in existing else "create"}
+            {
+                "kind": spec.kind,
+                "name": spec.name,
+                "action": "exists" if (spec.kind, spec.name.casefold()) in existing else "create",
+            }
             for spec in batch.resources
         ]
         _json({"course": batch.course, "section": sect.name, "apply": apply, "plan": plan})
         if not apply:
             typer.echo("Preview only. Re-run with --apply to create resources.")
             return
-        outcomes = []
+        outcomes: list[dict[str, str]] = []
         for spec in batch.resources:
             # Re-resolve and check before every write for idempotency.
             try:

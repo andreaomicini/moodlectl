@@ -1,0 +1,21 @@
+# Example for https://virtuale.unibo.it/course/view.php?id=80509
+# Replace example.org links with the verified lecture PDF/online links.
+course: 80509
+section: "Module 2"
+resources:
+  - kind: url
+    name: "Lecture A - Agents & Tools"
+    url: "https://example.org/slides/agents.pdf"
+    description: "[Online version (rolling)](https://example.org/slides/agents/)"
+    description_format: markdown
+    show_description: true
+    visible: false
+    # Arbitrary Moodle form fields can be set by CSS selector:
+    # fields:
+    #   "#id_display": {label: "Open"}
+  - kind: url
+    name: "Lecture B - Agentic workflows"
+    url: "https://example.org/slides/workflows.pdf"
+    description: "[Online version (rolling)](https://example.org/slides/workflows/)"
+    description_format: markdown
+    show_description: true

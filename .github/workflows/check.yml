@@ -1,0 +1,58 @@
+name: Check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    name: Preliminary checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync
+      - run: uv run poe static-checks
+      - run: uv run poe coverage
+      - run: uv run poe coverage-report
+      - run: uv run poe coverage-html
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report-${{ github.sha }}
+          path: htmlcov
+          if-no-files-found: ignore
+          overwrite: true
+
+  test:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    name: Test on Python ${{ matrix.python-version }}, on ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - run: uv sync
+      - run: uv run poe test
+
+  deploy:
+    name: Deploy
+    needs: test
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit

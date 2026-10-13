@@ -80,7 +80,9 @@ SECTION_JS = r"""() => {
      const href = a.href;
      const mod = href.match(/\/mod\/([a-z0-9_]+)\/view\.php/i);
      if (!mod) continue;
-     const name = (a.querySelector('.instancename')?.textContent || a.textContent || '').replace(/\s+/g,' ').trim();
+     const label = (a.querySelector('.instancename') || a).cloneNode(true);
+     label.querySelectorAll('.accesshide').forEach(h => h.remove());  // screen-reader-only " URL"/" File" suffix
+     const name = (label.textContent || '').replace(/\s+/g,' ').trim();
      const cm = (el.id || el.closest('[id^="module-"]')?.id || '').match(/module-(\d+)/);
      const cmid = cm ? Number(cm[1]) : Number(new URL(href).searchParams.get('id')) || null;
      const dup = cmid ? `id:${cmid}` : `url:${href}`;

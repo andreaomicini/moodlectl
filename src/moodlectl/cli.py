@@ -37,8 +37,22 @@ def global_options(
     ctx: typer.Context,
     profile: str = typer.Option("default", "--profile", help="Isolated SSO browser profile"),
     site: Optional[str] = typer.Option(None, "--site", help="Moodle base URL (or MOODLE_SITE_URL)"),
+    browser: str = typer.Option(
+        "auto",
+        "--browser",
+        envvar="MOODLE_BROWSER",
+        help="auto, webkit, firefox, chromium (Playwright builds), chrome, msedge (installed)",
+    ),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        envvar="MOODLE_HEADLESS",
+        help="No browser window; `login` then asks for SSO credentials in the terminal",
+    ),
 ):
     ctx.obj = Settings.load(profile, site)
+    ctx.obj.browser = browser
+    ctx.obj.headless = headless
 
 
 def _settings(ctx: typer.Context) -> Settings:
@@ -54,7 +68,7 @@ def _cid(ctx: typer.Context, provided: int | None) -> int:
 
 @contextmanager
 def browser(ctx: typer.Context):
-    with BrowserMoodle(_settings(ctx)) as moodle:
+    with BrowserMoodle(_settings(ctx), headless=_settings(ctx).headless) as moodle:
         yield moodle
 
 
@@ -64,10 +78,10 @@ def _json(value: Any) -> None:
 
 @app.command()
 def login(ctx: typer.Context):
-    """Log in using Unibo SSO in a visible browser; keep browser profile for later commands."""
+    """Log in via SSO in a visible browser (or in the terminal with --headless)."""
     with browser(ctx) as moodle:
         moodle.login()
-    typer.echo("Authenticated Chromium profile saved locally.")
+    typer.echo("Authenticated browser profile saved locally.")
 
 
 @config.command("show")

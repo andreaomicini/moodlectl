@@ -1,15 +1,32 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+import sys
 from contextlib import AbstractContextManager
 from urllib.parse import parse_qs, urlencode, urlsplit
+from getpass import getpass
 from typing import Any
 
 from playwright.sync_api import sync_playwright, Page, Locator, TimeoutError as PWTimeout
+from playwright.sync_api import Error as PWError
 
 from .config import Settings
 from .errors import AmbiguousMatch, LoginRequired, moodlectlError, MoodleFormError
 from .models import Course, Resource, ResourceSpec, Section
+
+
+# Engines Playwright drives with its own builds; any other name is a Chromium channel
+# (chromium = bundled, chrome/msedge = installed browsers, chrome-beta, ...).
+OWN_ENGINES = ("firefox", "webkit")
+
+
+def auto_browsers() -> tuple[str, ...]:
+    """`--browser auto` order: the closest drivable match to the OS default browser
+    (WebKit for Safari, installed Edge, Playwright's Firefox), then Chromium, then Chrome."""
+    first = {"darwin": "webkit", "win32": "msedge"}.get(sys.platform, "firefox")
+    return (first, "chromium", "chrome")
 
 
 # Moodle has no universal create-URL external web-service endpoint. Use the
@@ -52,8 +69,31 @@ SECTION_JS = r"""() => {
 }"""
 
 
+# One terminal-login step: tag visible text fields and clickable elements with
+# data-moodlectl keys, and return them with the page's visible text.
+STEP_JS = r"""() => {
+ const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+ const textOf = e => (e.innerText || e.value || e.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+ document.querySelectorAll('[data-moodlectl]').forEach(e => e.removeAttribute('data-moodlectl'));
+ const tag = (e, key) => { e.setAttribute('data-moodlectl', key); return key; };
+ const skip = /^(hidden|submit|button|checkbox|radio|image|reset|file)$/;
+ const fields = [...document.querySelectorAll('input, textarea')]
+   .filter(e => vis(e) && !e.disabled && !e.readOnly && !skip.test(e.type))
+   .map((e, i) => ({key: tag(e, 'f' + i), secret: e.type === 'password',
+     user: e.type === 'email' || /user|mail|login/i.test(`${e.name} ${e.id} ${e.autocomplete}`),
+     label: e.labels?.[0]?.innerText.trim() || e.placeholder || e.getAttribute('aria-label') || e.name || e.type}));
+ const all = [...document.querySelectorAll(
+   'a[href], button, input[type=submit], input[type=button], [role=button], [onclick]')].filter(vis);
+ const seen = new Set();
+ const actions = all.filter(e => !all.some(o => o !== e && e.contains(o)))
+   .map(e => [e, textOf(e)]).filter(([e, t]) => t && !seen.has(t) && seen.add(t))
+   .map(([e, t], i) => ({key: tag(e, 'a' + i), label: t.slice(0, 80)}));
+ return {text: document.body.innerText.replace(/\s+/g, ' ').trim().slice(0, 1000), fields, actions};
+}"""
+
+
 class BrowserMoodle(AbstractContextManager):
-    """Browser-backed Moodle operations using a persistent Chromium SSO profile.
+    """Browser-backed Moodle operations using a persistent browser SSO profile.
 
     Start with `with BrowserMoodle(Settings.load()) as moodle:`. The browser is
     visible so the user can complete Unibo SSO/MFA using official login pages.
@@ -67,6 +107,7 @@ class BrowserMoodle(AbstractContextManager):
         self._pw = None
         self.context = None
         self.page: Page | None = None
+        self._profile_dir = settings.browser_dir
 
     def __enter__(self):
         if self._pw is not None:
@@ -75,13 +116,33 @@ class BrowserMoodle(AbstractContextManager):
         self.settings.browser_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.settings.browser_dir.chmod(0o700)
         self._pw = sync_playwright().start()
+        choice = self.settings.browser
+        candidates = auto_browsers() if choice == "auto" else (choice,)
+        errors = []
         try:
-            self.context = self._pw.chromium.launch_persistent_context(
-                str(self.settings.browser_dir),
-                headless=self.headless,
-                accept_downloads=True,
-                viewport={"width": 1380, "height": 960},
-            )
+            for name in candidates:
+                # Engines cannot share a profile; Chromium channels share one.
+                engine = name if name in OWN_ENGINES else "chromium"
+                self._profile_dir = self.settings.browser_dir / engine
+                self._profile_dir.mkdir(exist_ok=True, mode=0o700)
+                try:
+                    self.context = getattr(self._pw, engine).launch_persistent_context(
+                        str(self._profile_dir),
+                        headless=self.headless,
+                        accept_downloads=True,
+                        viewport={"width": 1380, "height": 960},
+                        **({} if engine in OWN_ENGINES else {"channel": name}),
+                    )
+                    break
+                except PWError as exc:
+                    errors.append(f"{name}: {exc.message.strip().splitlines()[0]}")
+            else:
+                raise moodlectlError(
+                    "No usable browser found (" + "; ".join(errors) + "). Install one with "
+                    "`playwright install webkit|firefox|chromium`, or install Chrome or Edge."
+                )
+            if self._session_file.is_file():
+                self.context.add_cookies(json.loads(self._session_file.read_text("utf-8")))
             self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
             self.page.set_default_timeout(self.timeout_ms)
         except Exception:
@@ -90,8 +151,17 @@ class BrowserMoodle(AbstractContextManager):
             raise
         return self
 
+    @property
+    def _session_file(self):
+        return self._profile_dir / "moodlectl-session-cookies.json"
+
     def __exit__(self, *_):
         if self.context is not None:
+            # Browsers drop session cookies (e.g. MoodleSession) on close; keep them
+            # next to the profile, with the same protection, and restore on next start.
+            session = [c for c in self.context.cookies() if c.get("expires", -1) == -1]
+            self._session_file.write_text(json.dumps(session), "utf-8")
+            os.chmod(self._session_file, 0o600)
             self.context.close()
         if self._pw is not None:
             self._pw.stop()
@@ -120,14 +190,68 @@ class BrowserMoodle(AbstractContextManager):
             raise LoginRequired("Moodle login form displayed; run `moodlectl login` first")
 
     def login(self) -> None:
-        """Interactive SSO: credentials/MFA are entered only in the real browser."""
+        """Interactive SSO in the visible browser, or step by step in the terminal if headless."""
         self._goto("/my/courses.php", login_ok=True)
-        print("Complete the University's SSO/MFA login in the opened Chromium window.")
-        input("When the authenticated Moodle page is visible, press Enter here: ")
+        if self.headless:
+            self._terminal_login()
+        else:
+            print("Complete the University's SSO/MFA login in the opened browser window.")
+            input("When the authenticated Moodle page is visible, press Enter here: ")
         # Recheck a protected route; do not persist passwords or request tokens.
         p = self._goto("/my/courses.php")
         if p.locator("body.notloggedin, #page-login-index").count():
             raise LoginRequired("Moodle does not report an authenticated account")
+
+    def _terminal_login(self) -> None:
+        """Walk the SSO pages headlessly: show each page's text, prompt for its fields,
+        and let the user pick what to click. Passwords are read with getpass and only
+        typed into the page; they are never printed or stored.
+        """
+        # ponytail: main frame only; add frame traversal if an IdP puts its form in an iframe.
+        try:
+            self._terminal_login_steps()
+        except EOFError:
+            raise LoginRequired("Login aborted: no more terminal input") from None
+
+    def _terminal_login_steps(self) -> None:
+        p = self.page
+        assert p is not None
+        while True:
+            try:
+                self._require_login()
+                return
+            except LoginRequired:
+                pass
+            step = p.evaluate(STEP_JS)
+            fields, actions = step["fields"], step["actions"]
+            print(f"\n--- {p.title() or urlsplit(p.url).netloc} ---\n{step['text']}\n")
+            for field in fields:
+                env = "MOODLE_PASSWORD" if field["secret"] else "MOODLE_USERNAME"
+                value = os.environ.get(env) if field["secret"] or field["user"] else None
+                if value:
+                    print(f"{field['label']}: (from {env})")
+                else:
+                    value = (getpass if field["secret"] else input)(f"{field['label']}: ")
+                if value:
+                    p.locator(f'[data-moodlectl="{field["key"]}"]').fill(value)
+            for i, action in enumerate(actions, 1):
+                print(f"  {i}) {action['label']}")
+            default = "submit" if fields else "wait for the page to change"
+            while True:
+                choice = input(f"Choose 1-{len(actions)}, Enter = {default}, q = quit: ").strip()
+                if choice == "q":
+                    raise LoginRequired("Login aborted")
+                if choice == "" or (choice.isdigit() and 1 <= int(choice) <= len(actions)):
+                    break
+            if choice:
+                p.locator(f'[data-moodlectl="{actions[int(choice) - 1]["key"]}"]').click()
+            elif fields:
+                p.locator(f'[data-moodlectl="{fields[-1]["key"]}"]').press("Enter")
+            p.wait_for_timeout(1500)
+            try:
+                p.wait_for_load_state("networkidle", timeout=self.timeout_ms)
+            except PWTimeout:
+                pass
 
     def list_courses(self, search: str | None = None) -> list[Course]:
         path = (

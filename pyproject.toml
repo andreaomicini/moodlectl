@@ -42,6 +42,7 @@ testpaths = ["tests"]
 
 [tool.poe.tasks]
 test = "pytest"
+test-live = "pytest -s tests/test_live.py"
 coverage = "coverage run -m pytest"
 coverage-report = "coverage report -m"
 coverage-html = "coverage html"

@@ -9,7 +9,7 @@ manifests, Python API, limitations) lives in `README.md`; do not duplicate it he
 src/moodlectl/
   cli.py        Typer app; sub-apps: courses, sections, resources, config, api, manifest.
                 Entry point `main()` turns `moodlectlError` into "Error: ..." + exit 1.
-  browser.py    BrowserMoodle: Playwright persistent-Chromium backend (SSO session).
+  browser.py    BrowserMoodle: Playwright persistent-browser backend (SSO session).
                 Scrapes course pages (SECTION_JS) and drives /course/modedit.php forms.
   rest.py       MoodleREST: token-based /webservice/rest/server.php client (httpx),
                 plus flatten_moodle_params() for Moodle's bracket-form params.
@@ -60,11 +60,21 @@ on ubuntu/windows/macos x Python 3.10-3.13, then the semantic-release deploy.
   Playwright syntax) and raises if none match; `_optional()` returns `None`.
   `_fill_field()` maps str/number -> fill, bool -> checkbox, `{label|value}` -> select.
 - Unrecognized form controls must raise `MoodleFormError`, never be silently skipped.
-- Security: never handle SSO passwords or export cookies; the Chromium profile dir
-  is the session. `normalized_site()` rejects plain HTTP except localhost.
+- Security: never store or print SSO passwords (only `_terminal_login` reads one, via
+  getpass or `MOODLE_PASSWORD`, and types it into the page); the profile dir is the session. `normalized_site()` rejects plain HTTP except localhost.
   REST token comes only from `MOODLE_WS_TOKEN` or the constructor.
 - Browser runs headed by default (`headless=False`); the CLI does not expose a
-  headless flag.
+  headless flag. `Settings.browser` (CLI `--browser`, not persisted) picks the
+  browser: `firefox`/`webkit` (Playwright builds) or a Chromium channel; `auto`
+  follows `auto_browsers()`. Each engine has its own profile subdir
+  (`<browser_dir>/{chromium,firefox,webkit}`).
+- `--headless login` runs `_terminal_login()`: a generic loop over SSO pages driven
+  by `STEP_JS` (main frame only), not tied to any IdP's selectors. Keep it generic.
+- `__exit__` saves session cookies (expires == -1) to
+  `<browser_dir>/moodlectl-session-cookies.json` (0600); `__enter__` restores them.
+  Without this, the browser drops `MoodleSession` and every run would need a new login.
+- `tests/test_live.py` is the only exception to the next rule: opt-in
+  (`MOODLE_LIVE_TEST=1` + credentials), run with `poe test-live`.
 - Tests must not hit the network or a browser: use `httpx.MockTransport`-style
   fakes / static HTML (see `tests/test_rest.py`, `tests/test_importers.py`).
 - Ruff: line length 100, target py310. Code must run on Python 3.10.

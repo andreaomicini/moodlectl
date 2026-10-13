@@ -8,7 +8,7 @@ This is an independent utility, not an official University of Bologna/Moodle int
 
 ## Why two backends?
 
-* **Browser automation (default)** uses Playwright/Chromium. You authenticate
+* **Browser automation (default)** uses Playwright (WebKit, Firefox, Chromium, Chrome or Edge). You authenticate
   using the institution's real browser SSO/MFA flow; no passwords or SSO bypasses.
   This is the practical route for creating standard URL resources when REST tokens
   are not enabled or when a create-activity web service is not provisioned.
@@ -24,7 +24,7 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
 
 ```bash
 uv sync --all-groups
-uv run playwright install chromium
+uv run playwright install chromium   # optional if Chrome or Edge is installed
 source .venv/bin/activate
 
 moodlectl config set-site https://virtuale.unibo.it
@@ -34,13 +34,36 @@ moodlectl login
 `uv sync --all-groups` creates the virtual environment and installs the project,
 test tools, and development tools from `pyproject.toml`.
 
-`login` opens a **visible, dedicated Chromium window**. Complete the normal
+`login` opens a **visible, dedicated browser window**. Complete the normal
 Unibo SSO process there, including MFA when requested. When Moodle is visible,
-return to the terminal and press Enter. The persistent Chromium browser profile
-is reused by subsequent commands. The tool does not ask for, save, or intercept
-university passwords. Use the same `--profile` for login and later operations.
+return to the terminal and press Enter. The persistent browser profile
+is reused by subsequent commands (session cookies are kept in the profile directory
+too, since the browser would otherwise drop them on exit). In this mode the tool never
+sees your password. Use the same `--profile` for login and later operations.
 
-On macOS, the first run may require installing Playwright's Chromium browser.
+Without a display (e.g. over SSH), use `moodlectl --headless login`: no window
+opens, and each SSO page is shown in the terminal as text, followed by prompts
+for its fields (passwords via a hidden prompt, never stored) and a numbered list
+of buttons/links to click. Press Enter on a page with no fields to wait, e.g. while
+approving an MFA push. Use `--headless` (or `MOODLE_HEADLESS=1`) on later commands
+too. If `MOODLE_USERNAME` / `MOODLE_PASSWORD` are set, username and password fields
+are filled from them instead of prompting (set the password with `read -s` rather
+than typing it on the command line).
+
+`--browser` (or `MOODLE_BROWSER`), placed before the subcommand, picks the browser:
+
+| Value | Browser | Install |
+|---|---|---|
+| `webkit` | Playwright's WebKit (Safari's engine) | `playwright install webkit` |
+| `firefox` | Playwright's Firefox build | `playwright install firefox` |
+| `chromium` | Playwright's Chromium | `playwright install chromium` |
+| `chrome`, `msedge` | the installed Google Chrome / Microsoft Edge | none |
+
+The default, `auto`, tries the closest match to the OS default browser (WebKit
+on macOS, Edge on Windows, Firefox on Linux), then `chromium`, then `chrome`.
+Playwright cannot drive the installed Safari or Firefox apps, only its own
+builds. Each engine keeps its own login session, so log in again after switching
+between engines (Chromium, Chrome and Edge share one).
 
 ## CLI essentials
 
@@ -105,7 +128,7 @@ moodlectl --profile teaching resources list --section "Module 2"
 ```
 
 The saved default site/course are in
-`~/.config/moodlectl/PROFILE.json` (or `$XDG_CONFIG_HOME`), and the Chromium
+`~/.config/moodlectl/PROFILE.json` (or `$XDG_CONFIG_HOME`), and the browser
 profile is under `~/.local/share/moodlectl/profiles/PROFILE` (or
 `$XDG_DATA_HOME`); `moodlectl config show` prints both. Treat the browser profile as an authenticated session.
 
@@ -199,7 +222,8 @@ with MoodleREST("https://virtuale.unibo.it") as ws:
 * Browser course discovery is limited to course links rendered in the My Courses
   or course-search page. Explicit `--course` works even if the list is incomplete.
 * The browser profile stores authenticating cookies; protect it as you would
-  a web browser user profile. No SSO password is handled by this project.
+  a web browser user profile. Passwords are never stored; only
+  `--headless login` reads one, and passes it straight to the SSO page.
 * Moodle rich-text editors and course themes vary: unrecognized controls raise
   a clear `MoodleFormError` instead of silently submitting incomplete data.
 * A stable independent test Moodle instance or a dedicated test course is
@@ -209,6 +233,7 @@ with MoodleREST("https://virtuale.unibo.it") as ws:
 
 ```bash
 uv run poe test
+MOODLE_LIVE_TEST=1 uv run poe test-live   # real SSO login per browser, see tests/test_live.py
 uv run poe static-checks
 uv run poe format-check
 ```

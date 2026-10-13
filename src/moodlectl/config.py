@@ -31,6 +31,8 @@ class Settings:
     profile: str = "default"
     site: str = "https://virtuale.unibo.it"
     course_id: int | None = None
+    browser: str = "auto"  # not persisted; see browser.auto_browsers()
+    headless: bool = False  # not persisted; headless login prompts in the terminal
 
     @property
     def path(self) -> Path:
@@ -38,7 +40,7 @@ class Settings:
 
     @property
     def browser_dir(self) -> Path:
-        # Dedicated Chromium user-data dir; no cookie/token export or parsing.
+        # Browser profiles root; one subdir per engine (see BrowserMoodle).
         return _xdg_dir("XDG_DATA_HOME", ".local/share") / "moodlectl" / "profiles" / self.profile
 
     @classmethod

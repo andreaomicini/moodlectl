@@ -54,11 +54,13 @@ def global_options(
         envvar="MOODLE_BROWSER",
         help="auto, webkit, firefox, chromium (Playwright builds), chrome, msedge (installed)",
     ),
-    headless: bool = typer.Option(
-        False,
-        "--headless",
+    headless: Optional[bool] = typer.Option(
+        None,
+        "--headless/--headed",
         envvar="MOODLE_HEADLESS",
-        help="No browser window; `login` then asks for SSO credentials in the terminal",
+        show_default=False,
+        help="Hide/show the browser window. Default: shown for `login` only; "
+        "--headless login asks for SSO credentials in the terminal",
     ),
     cache_ttl: float = typer.Option(
         3600, "--cache-ttl", envvar="MOODLE_CACHE_TTL", help="Seconds to reuse scraped pages"
@@ -85,8 +87,10 @@ def _cid(ctx: typer.Context, provided: int | None) -> int:
 
 
 @contextmanager
-def browser(ctx: typer.Context):
-    with BrowserMoodle(_settings(ctx), headless=_settings(ctx).headless) as moodle:
+def browser(ctx: typer.Context, *, headless: bool = True):
+    """Browser session; `headless` is the default when neither flag nor env var is set."""
+    chosen = _settings(ctx).headless
+    with BrowserMoodle(_settings(ctx), headless=headless if chosen is None else chosen) as moodle:
         yield moodle
 
 
@@ -110,7 +114,7 @@ def _print(value: Any) -> None:
 @app.command()
 def login(ctx: typer.Context):
     """Log in via SSO in a visible browser (or in the terminal with --headless)."""
-    with browser(ctx) as moodle:
+    with browser(ctx, headless=False) as moodle:
         moodle.login()
     typer.echo("Authenticated browser profile saved locally.")
 

@@ -34,7 +34,7 @@ class Settings:
     site: str = "https://virtuale.unibo.it"
     course_id: int | None = None
     browser: str = "auto"  # not persisted; see browser.auto_browsers()
-    headless: bool = False  # not persisted; headless login prompts in the terminal
+    headless: bool | None = None  # not persisted; None: headed `login`, headless otherwise
     cache_ttl: float = 3600  # not persisted; seconds, <= 0 skips cached pages
 
     @property

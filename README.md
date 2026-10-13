@@ -45,8 +45,9 @@ Without a display (e.g. over SSH), use `moodlectl --headless login`: no window
 opens, and each SSO page is shown in the terminal as text, followed by prompts
 for its fields (passwords via a hidden prompt, never stored) and a numbered list
 of buttons/links to click. Press Enter on a page with no fields to wait, e.g. while
-approving an MFA push. Use `--headless` (or `MOODLE_HEADLESS=1`) on later commands
-too. If `MOODLE_USERNAME` / `MOODLE_PASSWORD` are set, username and password fields
+approving an MFA push. All other commands run headless by default, since they only
+reuse the saved session; pass `--headed` (or `MOODLE_HEADLESS=0`) to watch the browser,
+e.g. when debugging a form. `MOODLE_HEADLESS=1` makes `login` headless too. If `MOODLE_USERNAME` / `MOODLE_PASSWORD` are set, username and password fields
 are filled from them instead of prompting (set the password with `read -s` rather
 than typing it on the command line).
 

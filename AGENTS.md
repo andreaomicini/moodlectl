@@ -21,7 +21,7 @@ src/moodlectl/
   config.py     Settings per profile (XDG paths, 0600/0700 perms), normalized_site().
   errors.py     moodlectlError (sic, lowercase) and subclasses LoginRequired,
                 AmbiguousMatch, MoodleFormError.
-tests/          pytest unit tests: browser, config, forums, importers, manifest, rest.
+tests/          pytest unit tests: browser, cli, config, forums, importers, manifest, rest.
 examples/       module2.yaml manifest and python_api.py (writes are commented out).
 ```
 
@@ -73,8 +73,10 @@ on ubuntu/windows/macos x Python 3.10-3.13, then the semantic-release deploy.
 - Security: never store or print SSO passwords (only `_terminal_login` reads one, via
   getpass or `MOODLE_PASSWORD`, and types it into the page); the profile dir is the session. `normalized_site()` rejects plain HTTP except localhost.
   REST token comes only from `MOODLE_WS_TOKEN` or the constructor.
-- Browser runs headed by default (`headless=False`); the CLI does not expose a
-  headless flag. `Settings.browser` (CLI `--browser`, not persisted) picks the
+- `BrowserMoodle` is headed by default (`headless=False`). The CLI's
+  `--headless/--headed` (`MOODLE_HEADLESS`) sets `Settings.headless`; unset (None)
+  means headed for `login` and headless for everything else (see `cli.browser()`).
+  `Settings.browser` (CLI `--browser`, not persisted) picks the
   browser: `firefox`/`webkit` (Playwright builds) or a Chromium channel; `auto`
   follows `auto_browsers()`. Each engine has its own profile subdir
   (`<browser_dir>/{chromium,firefox,webkit}`).

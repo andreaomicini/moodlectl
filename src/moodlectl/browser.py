@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import shutil
 import sys
+import time
 from contextlib import AbstractContextManager
 from urllib.parse import parse_qs, urlencode, urlsplit
 from getpass import getpass
@@ -113,6 +116,7 @@ class BrowserMoodle(AbstractContextManager):
 
     Start with `with BrowserMoodle(Settings.load()) as moodle:`. The browser is
     visible so the user can complete Unibo SSO/MFA using official login pages.
+    It starts on first navigation, so reads served from the page cache need none.
     """
 
     def __init__(self, settings: Settings, *, headless: bool = False, timeout_ms: int = 25000):
@@ -120,14 +124,18 @@ class BrowserMoodle(AbstractContextManager):
         self.site = settings.site
         self.headless = headless
         self.timeout_ms = timeout_ms
-        self._pw = None
-        self.context = None
+        self._pw: Any = None
+        self.context: Any = None
         self.page: Page | None = None
         self._profile_dir = settings.browser_dir
+        self._wrote = False
 
     def __enter__(self):
-        if self._pw is not None:
-            raise moodlectlError("BrowserMoodle context is already running")
+        return self
+
+    def _start(self) -> Page:
+        if self.page is not None:
+            return self.page
         self.settings.browser_dir.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.settings.browser_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.settings.browser_dir.chmod(0o700)
@@ -165,13 +173,15 @@ class BrowserMoodle(AbstractContextManager):
             self._pw.stop()
             self._pw = None
             raise
-        return self
+        return self.page
 
     @property
     def _session_file(self):
         return self._profile_dir / "moodlectl-session-cookies.json"
 
     def __exit__(self, *_):
+        if self._wrote:
+            self.clear_cache()
         if self.context is not None:
             # Browsers drop session cookies (e.g. MoodleSession) on close; keep them
             # next to the profile, with the same protection, and restore on next start.
@@ -184,7 +194,8 @@ class BrowserMoodle(AbstractContextManager):
         self._pw = self.context = self.page = None
 
     def _goto(self, path: str, *, login_ok: bool = False) -> Page:
-        assert self.page is not None, "Use BrowserMoodle inside a with block"
+        self._start()
+        assert self.page is not None
         self.page.goto(f"{self.site}{path}", wait_until="domcontentloaded")
         if not login_ok:
             self._require_login()
@@ -204,6 +215,27 @@ class BrowserMoodle(AbstractContextManager):
             )
         if self.page.locator('form#login, input[name="password"]').count():
             raise LoginRequired("Moodle login form displayed; run `moodlectl login` first")
+
+    def _scrape(self, path: str, extract: Any) -> Any:
+        """`extract(page)` at `path`, as JSON data cached per URL for `cache_ttl` seconds."""
+        key = hashlib.sha256(f"{self.site}{path}".encode()).hexdigest()
+        file = self.settings.cache_dir / f"{key}.json"
+        ttl = 0 if self._wrote else self.settings.cache_ttl
+        if file.is_file() and time.time() - file.stat().st_mtime < ttl:
+            return json.loads(file.read_text("utf-8"))
+        data = extract(self._goto(path))
+        file.parent.parent.mkdir(exist_ok=True, mode=0o700)
+        file.parent.mkdir(exist_ok=True, mode=0o700)
+        file.write_text(json.dumps(data), "utf-8")
+        os.chmod(file, 0o600)
+        return data
+
+    def clear_cache(self) -> None:
+        shutil.rmtree(self.settings.cache_dir, ignore_errors=True)
+
+    def _writing(self) -> None:
+        # Writes read live pages (dedup/verify) and drop the cache on exit.
+        self._wrote = True
 
     def login(self) -> None:
         """Interactive SSO in the visible browser, or step by step in the terminal if headless."""
@@ -273,26 +305,31 @@ class BrowserMoodle(AbstractContextManager):
         path = (
             "/course/search.php?" + urlencode({"search": search}) if search else "/my/courses.php"
         )
-        p = self._goto(path)
-        # Moodle 4+ renders the My Courses overview via AJAX after page load.
-        try:
-            p.wait_for_load_state("networkidle", timeout=self.timeout_ms)
-        except PWTimeout:
-            pass
-        raw = p.eval_on_selector_all(
-            'a[href*="/course/view.php?id="]',
-            # Drop screen-reader/hidden spans (e.g. "Course is starred") from card links.
-            """els => els.map(a => {
-              const c = a.cloneNode(true);
-              c.querySelectorAll('.sr-only, .visually-hidden, .hidden')
-                .forEach(e => e.remove());
-              return {name: c.textContent.replace(/\\s+/g, ' ').trim(), url: a.href};
-            })""",
-        )
-        try:
-            years = dict(p.evaluate(YEARS_JS))
-        except PWError:
-            years = {}
+
+        def extract(p: Page) -> dict:
+            # Moodle 4+ renders the My Courses overview via AJAX after page load.
+            try:
+                p.wait_for_load_state("networkidle", timeout=self.timeout_ms)
+            except PWTimeout:
+                pass
+            links = p.eval_on_selector_all(
+                'a[href*="/course/view.php?id="]',
+                # Drop screen-reader/hidden spans (e.g. "Course is starred") from card links.
+                """els => els.map(a => {
+                  const c = a.cloneNode(true);
+                  c.querySelectorAll('.sr-only, .visually-hidden, .hidden')
+                    .forEach(e => e.remove());
+                  return {name: c.textContent.replace(/\\s+/g, ' ').trim(), url: a.href};
+                })""",
+            )
+            try:
+                years = p.evaluate(YEARS_JS)
+            except PWError:
+                years = []
+            return {"links": links, "years": years}
+
+        data = self._scrape(path, extract)
+        raw, years = data["links"], {cid: year for cid, year in data["years"]}
         courses: dict[int, Course] = {}
         for item in raw:
             parsed = urlsplit(item["url"])
@@ -308,8 +345,9 @@ class BrowserMoodle(AbstractContextManager):
         return [c for c in result if not search or search.casefold() in c.name.casefold()]
 
     def course_sections(self, course_id: int) -> list[Section]:
-        p = self._goto(f"/course/view.php?id={int(course_id)}")
-        raw: list[dict] = p.evaluate(SECTION_JS)
+        raw: list[dict] = self._scrape(
+            f"/course/view.php?id={int(course_id)}", lambda p: p.evaluate(SECTION_JS)
+        )
         if not raw:
             raise moodlectlError("Cannot find Moodle course sections; check course access/layout")
         return [
@@ -518,6 +556,7 @@ class BrowserMoodle(AbstractContextManager):
         Return 'created' or 'skipped'. No destructive overwrite occurs.
         """
         spec.validate()
+        self._writing()
         target = self.select_section(course_id, section)
         existing = [
             r
@@ -596,6 +635,7 @@ class BrowserMoodle(AbstractContextManager):
         fields: dict | None = None,
     ) -> None:
         """Update a URL activity using only the fields explicitly supplied."""
+        self._writing()
         existing = [r for r in self.list_resources(course_id) if r.cmid == cmid and r.kind == "url"]
         if len(existing) != 1:
             raise moodlectlError(f"URL activity cmid={cmid} not found in course {course_id}")

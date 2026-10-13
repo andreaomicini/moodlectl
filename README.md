@@ -99,6 +99,11 @@ moodlectl resources add-page "Course info" --content "<p>Hello</p>" --section "M
 # Inspect the real URL field, visibility, description etc.
 moodlectl resources show 12345
 
+# Course and section listings are cached per URL for 1h (in the temp dir)
+moodlectl --cache-ttl 600 sections list   # or MOODLE_CACHE_TTL=600
+moodlectl --no-cache sections list        # or MOODLE_NO_CACHE=1; refreshes the cache
+moodlectl cache clear
+
 # See all form control selectors and select options for customization
 moodlectl resources inspect-form --section "Module 2" --kind url
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
+from getpass import getuser
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -33,6 +35,7 @@ class Settings:
     course_id: int | None = None
     browser: str = "auto"  # not persisted; see browser.auto_browsers()
     headless: bool = False  # not persisted; headless login prompts in the terminal
+    cache_ttl: float = 3600  # not persisted; seconds, <= 0 skips cached pages
 
     @property
     def path(self) -> Path:
@@ -42,6 +45,11 @@ class Settings:
     def browser_dir(self) -> Path:
         # Browser profiles root; one subdir per engine (see BrowserMoodle).
         return _xdg_dir("XDG_DATA_HOME", ".local/share") / "moodlectl" / "profiles" / self.profile
+
+    @property
+    def cache_dir(self) -> Path:
+        # Scraped pages, per URL (see BrowserMoodle._scrape); per user, since /tmp is shared.
+        return Path(tempfile.gettempdir()) / f"moodlectl-{getuser()}" / self.profile
 
     @classmethod
     def load(cls, profile: str = "default", site: str | None = None) -> "Settings":

@@ -70,6 +70,10 @@ on ubuntu/windows/macos x Python 3.10-3.13, then the semantic-release deploy.
   (`<browser_dir>/{chromium,firefox,webkit}`).
 - `--headless login` runs `_terminal_login()`: a generic loop over SSO pages driven
   by `STEP_JS` (main frame only), not tied to any IdP's selectors. Keep it generic.
+- The browser starts lazily on the first `_goto()`. `_scrape(path, extract)` caches
+  `extract(page)` JSON per URL in `Settings.cache_dir` for `cache_ttl` seconds
+  (`--cache-ttl`/`--no-cache`); only listings use it, edit forms are always live.
+  Write methods call `_writing()`: later reads skip the cache and `__exit__` clears it.
 - `__exit__` saves session cookies (expires == -1) to
   `<browser_dir>/moodlectl-session-cookies.json` (0600); `__enter__` restores them.
   Without this, the browser drops `MoodleSession` and every run would need a new login.

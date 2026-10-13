@@ -25,12 +25,14 @@ resources = typer.Typer(no_args_is_help=True, help="List, create, and update res
 config = typer.Typer(no_args_is_help=True, help="Manage local configuration")
 api = typer.Typer(no_args_is_help=True, help="Call Moodle native REST web services")
 manifest = typer.Typer(no_args_is_help=True, help="Build declarative YAML manifests")
+cache = typer.Typer(no_args_is_help=True, help="Manage the local page cache")
 app.add_typer(courses, name="courses")
 app.add_typer(sections, name="sections")
 app.add_typer(resources, name="resources")
 app.add_typer(config, name="config")
 app.add_typer(api, name="api")
 app.add_typer(manifest, name="manifest")
+app.add_typer(cache, name="cache")
 
 
 @app.callback()
@@ -50,10 +52,17 @@ def global_options(
         envvar="MOODLE_HEADLESS",
         help="No browser window; `login` then asks for SSO credentials in the terminal",
     ),
+    cache_ttl: float = typer.Option(
+        3600, "--cache-ttl", envvar="MOODLE_CACHE_TTL", help="Seconds to reuse scraped pages"
+    ),
+    no_cache: bool = typer.Option(
+        False, "--no-cache", envvar="MOODLE_NO_CACHE", help="Ignore cached pages (still refreshes)"
+    ),
 ):
     ctx.obj = Settings.load(profile, site)
     ctx.obj.browser = browser
     ctx.obj.headless = headless
+    ctx.obj.cache_ttl = 0 if no_cache else cache_ttl
 
 
 def _settings(ctx: typer.Context) -> Settings:
@@ -95,6 +104,8 @@ def config_show(ctx: typer.Context):
             "course_id": s.course_id,
             "config_path": str(s.path),
             "browser_dir": str(s.browser_dir),
+            "cache_dir": str(s.cache_dir),
+            "cache_ttl": s.cache_ttl,
         }
     )
 
@@ -105,6 +116,13 @@ def config_set_site(ctx: typer.Context, url: str):
     s.site = normalized_site(url)
     s.save()
     typer.echo(f"Moodle site: {s.site}")
+
+
+@cache.command("clear")
+def cache_clear(ctx: typer.Context):
+    """Delete this profile's cached pages."""
+    BrowserMoodle(_settings(ctx)).clear_cache()
+    typer.echo(f"Cleared {_settings(ctx).cache_dir}")
 
 
 @courses.command("list")

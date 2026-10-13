@@ -7,8 +7,8 @@ manifests, Python API, limitations) lives in `README.md`; do not duplicate it he
 
 ```
 src/moodlectl/
-  cli.py        Typer app; sub-apps: courses, sections, resources, forums, config, api,
-                manifest, cache.
+  cli.py        Typer app; sub-apps: courses, sections, resources, forums, discussions,
+                posts, config, api, manifest, cache.
                 Entry point `main()` turns `moodlectlError` into "Error: ..." + exit 1.
   browser.py    BrowserMoodle: Playwright persistent-browser backend (SSO session).
                 Scrapes course pages (SECTION_JS) and drives /course/modedit.php forms.

@@ -814,13 +814,19 @@ class BrowserMoodle(AbstractContextManager):
         return [Discussion(**r) for r in rows]
 
     def _raw_posts(self, p: Page, discussion_id: int) -> dict:
-        return self._ajax(
-            p,
-            "mod_forum_get_discussion_posts",
-            discussionid=int(discussion_id),
-            sortby="created",
-            sortdirection="ASC",
-        )
+        try:
+            return self._ajax(
+                p,
+                "mod_forum_get_discussion_posts",
+                discussionid=int(discussion_id),
+                sortby="created",
+                sortdirection="ASC",
+            )
+        except moodlectlError as exc:
+            raise moodlectlError(
+                f"Cannot read discussion {discussion_id} ({exc}). Is it a discussion id "
+                "(discuss.php?d=)? A forum's id (view.php?id=) goes to `forums discussions`."
+            ) from None
 
     def list_posts(self, discussion_id: int, *, html: bool = False) -> list[Post]:
         """Posts of a discussion, oldest first; message as plain text unless `html`."""

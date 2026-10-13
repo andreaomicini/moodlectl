@@ -7,6 +7,7 @@ import sys
 from contextlib import contextmanager
 from dataclasses import asdict
 from typing import Any, Optional, cast
+from urllib.parse import parse_qs, urlsplit
 
 import typer
 import yaml
@@ -27,7 +28,9 @@ config = typer.Typer(no_args_is_help=True, help="Manage local configuration")
 api = typer.Typer(no_args_is_help=True, help="Call Moodle native REST web services")
 manifest = typer.Typer(no_args_is_help=True, help="Build declarative YAML manifests")
 cache = typer.Typer(no_args_is_help=True, help="Manage the local page cache")
-forums = typer.Typer(no_args_is_help=True, help="Read and write forum discussions and posts")
+forums = typer.Typer(no_args_is_help=True, help="Find a course's forums")
+discussions = typer.Typer(no_args_is_help=True, help="List, read, start and manage discussions")
+posts = typer.Typer(no_args_is_help=True, help="Reply to, edit and delete forum posts")
 app.add_typer(courses, name="courses")
 app.add_typer(sections, name="sections")
 app.add_typer(resources, name="resources")
@@ -36,6 +39,8 @@ app.add_typer(api, name="api")
 app.add_typer(manifest, name="manifest")
 app.add_typer(cache, name="cache")
 app.add_typer(forums, name="forums")
+app.add_typer(discussions, name="discussions")
+app.add_typer(posts, name="posts")
 
 
 @app.callback()
@@ -297,27 +302,51 @@ def update_url(
 
 @forums.command("list")
 def forums_list(ctx: typer.Context, course: Optional[int] = typer.Option(None, "--course")):
-    """List the course's forums (their cmid selects them in other commands)."""
+    """List the course's forums (their cmid selects them in `discussions` commands)."""
     with browser(ctx) as moodle:
         _print([asdict(r) for r in moodle.list_forums(_cid(ctx, course))])
 
 
-@forums.command("discussions")
-def forums_discussions(ctx: typer.Context, forum: int = typer.Argument(..., help="Forum cmid")):
+# Which page/query key identifies each kind in a pasted URL, and the command reading it.
+_REF_URLS = {
+    "forum": ("view.php", "id", "discussions list"),
+    "discussion": ("discuss.php", "d", "discussions show"),
+}
+
+
+def forum_ref(value: str, kind: str) -> int:
+    """Id of a `kind` ("forum" cmid or "discussion"), bare or in a pasted Moodle URL."""
+    if value.isdigit():
+        return int(value)
+    url = urlsplit(value)
+    query = parse_qs(url.query)
+    for other, (page, key, command) in _REF_URLS.items():
+        if url.path.endswith(f"/mod/forum/{page}") and query.get(key, [""])[0].isdigit():
+            if other != kind:
+                raise moodlectlError(f"That is a {other}; use `{command} {query[key][0]}`")
+            return int(query[key][0])
+    raise moodlectlError(f"Not a {kind} id or URL: {value!r}")
+
+
+@discussions.command("list")
+def discussions_list(
+    ctx: typer.Context, forum: str = typer.Argument(..., help="Forum cmid or view.php URL")
+):
     """List a forum's discussions, with authors, dates, replies and states."""
     with browser(ctx) as moodle:
-        _print([asdict(d) for d in moodle.list_discussions(forum)])
+        _print([asdict(d) for d in moodle.list_discussions(forum_ref(forum, "forum"))])
 
 
-@forums.command("show")
-def forums_show(
+@discussions.command("show")
+def discussions_show(
     ctx: typer.Context,
-    discussion: int = typer.Argument(..., help="Discussion id"),
+    discussion: str = typer.Argument(..., help="Discussion id or discuss.php URL"),
     html: bool = typer.Option(False, "--html", help="Print messages as Moodle's HTML"),
 ):
-    """Show a discussion's posts (oldest first) with authors and metadata."""
+    """Show a discussion's posts (oldest first) with authors, metadata and attachments."""
+    ref = forum_ref(discussion, "discussion")
     with browser(ctx) as moodle:
-        _print([asdict(x) for x in moodle.list_posts(discussion, html=html)])
+        _print([asdict(x) for x in moodle.list_posts(ref, html=html)])
 
 
 def _text(value: str | None) -> str | None:
@@ -329,10 +358,10 @@ _FORMAT_HELP = "markdown, html, plain or auto"
 _ATTACH_HELP = "File to attach (repeatable)"
 
 
-@forums.command("post")
-def forums_post(
+@discussions.command("add")
+def discussions_add(
     ctx: typer.Context,
-    forum: int = typer.Argument(..., help="Forum cmid"),
+    forum: str = typer.Argument(..., help="Forum cmid or view.php URL"),
     subject: str = typer.Argument(...),
     message: str = typer.Option(..., "--message", "-m", help=_MESSAGE_HELP),
     text_format: str = typer.Option("markdown", "--format", help=_FORMAT_HELP),
@@ -344,7 +373,7 @@ def forums_post(
         raise moodlectlError("--if-exists supports skip or error")
     with browser(ctx) as moodle:
         result, discussion = moodle.add_discussion(
-            forum,
+            forum_ref(forum, "forum"),
             subject,
             _text(message) or "",
             text_format=text_format,
@@ -354,8 +383,8 @@ def forums_post(
     _print({result: {"discussion": discussion, "subject": subject}})
 
 
-@forums.command("reply")
-def forums_reply(
+@posts.command("reply")
+def posts_reply(
     ctx: typer.Context,
     post: int = typer.Argument(..., help="Post id to reply to"),
     message: str = typer.Option(..., "--message", "-m", help=_MESSAGE_HELP),
@@ -398,8 +427,8 @@ def forums_reply(
     _print({"created": {"post": new, "parent": post}})
 
 
-@forums.command("edit")
-def forums_edit(
+@posts.command("edit")
+def posts_edit(
     ctx: typer.Context,
     post: int = typer.Argument(..., help="Post id"),
     message: Optional[str] = typer.Option(None, "--message", "-m", help=_MESSAGE_HELP),
@@ -419,29 +448,49 @@ def forums_edit(
     typer.echo(f"updated: {post}")
 
 
-@forums.command("delete")
-def forums_delete(
-    ctx: typer.Context,
-    post: int = typer.Argument(..., help="Post id (a first post deletes its discussion)"),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask for confirmation"),
-):
-    """Delete a post and its replies, after showing Moodle's confirmation."""
-
+def _confirm_delete(yes: bool):
     def confirm(text: str) -> bool:
         if yes:
             return True
         typer.echo(text)
         return typer.confirm("Delete?", default=False)
 
+    return confirm
+
+
+_YES_HELP = "Do not ask for confirmation"
+
+
+@posts.command("delete")
+def posts_delete(
+    ctx: typer.Context,
+    post: int = typer.Argument(..., help="Post id (a first post deletes its discussion)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_YES_HELP),
+):
+    """Delete a post and its replies, after showing Moodle's confirmation."""
     with browser(ctx) as moodle:
-        deleted = moodle.delete_post(post, confirm)
+        deleted = moodle.delete_post(post, _confirm_delete(yes))
     typer.echo(f"deleted: {post}" if deleted else "aborted")
 
 
-@forums.command("set")
-def forums_set(
+@discussions.command("delete")
+def discussions_delete(
     ctx: typer.Context,
-    discussion: int = typer.Argument(..., help="Discussion id"),
+    discussion: str = typer.Argument(..., help="Discussion id or discuss.php URL"),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_YES_HELP),
+):
+    """Delete a whole discussion (its first post), after showing Moodle's confirmation."""
+    ref = forum_ref(discussion, "discussion")
+    with browser(ctx) as moodle:
+        first = next(x for x in moodle.list_posts(ref) if x.parent is None)
+        deleted = moodle.delete_post(first.id, _confirm_delete(yes))
+    typer.echo(f"deleted: discussion {ref}" if deleted else "aborted")
+
+
+@discussions.command("set")
+def discussions_set(
+    ctx: typer.Context,
+    discussion: str = typer.Argument(..., help="Discussion id or discuss.php URL"),
     locked: Optional[bool] = typer.Option(None, "--lock/--unlock"),
     pinned: Optional[bool] = typer.Option(None, "--pin/--unpin"),
     favourite: Optional[bool] = typer.Option(None, "--favourite/--unfavourite"),
@@ -453,7 +502,11 @@ def forums_set(
     with browser(ctx) as moodle:
         _print(
             moodle.set_discussion(
-                discussion, locked=locked, pinned=pinned, favourite=favourite, subscribed=subscribed
+                forum_ref(discussion, "discussion"),
+                locked=locked,
+                pinned=pinned,
+                favourite=favourite,
+                subscribed=subscribed,
             )
         )
 

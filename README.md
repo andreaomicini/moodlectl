@@ -101,15 +101,17 @@ moodlectl resources show 12345
 
 # Forums: list them, their discussions, and a discussion's posts (as plain text, or --html)
 moodlectl forums list
-moodlectl forums discussions 2263032          # forum cmid
-moodlectl forums show 230424                  # discussion id
+moodlectl discussions list 2263032            # forum cmid
+moodlectl discussions show 230424             # discussion id
+moodlectl discussions list 'https://virtuale.unibo.it/mod/forum/view.php?id=2263032'  # URLs too
 # Write: start a discussion, reply (optionally privately), edit, delete, set states
-moodlectl forums post 2263032 "Office hours" -m "Moved to **Friday**"   # --format markdown
-moodlectl forums reply 315396 -m "Thanks!" --private                     # post id
-moodlectl forums reply 315396 -m "Slides attached" -a l1.pdf -a l2.pdf  # --attach, repeatable
-echo "Longer text" | moodlectl forums edit 315849 -m - --subject "New subject"
-moodlectl forums delete 315849                # asks after showing Moodle's confirmation; -y skips
-moodlectl forums set 230424 --lock --pin --favourite --unsubscribe
+moodlectl discussions add 2263032 "Office hours" -m "Moved to **Friday**"   # --format markdown
+moodlectl posts reply 315396 -m "Thanks!" --private                      # post id
+moodlectl posts reply 315396 -m "Slides attached" -a l1.pdf -a l2.pdf   # --attach, repeatable
+echo "Longer text" | moodlectl posts edit 315849 -m - --subject "New subject"
+moodlectl posts delete 315849                 # asks after showing Moodle's confirmation; -y skips
+moodlectl discussions delete 230424           # deletes the whole discussion (same prompt)
+moodlectl discussions set 230424 --lock --pin --favourite --unsubscribe
 
 # Course and section listings are cached per URL for 1h (in the temp dir)
 moodlectl --cache-ttl 600 sections list   # or MOODLE_CACHE_TTL=600
@@ -191,20 +193,26 @@ fields accommodate additional activity settings where Moodle exposes them.
 
 ## Forums
 
-Forums are course resources of kind `forum`; commands take the forum's cmid, a
-discussion id, or a post id (all shown by the listing commands). Reading uses
-Moodle's own AJAX service (`mod_forum_get_discussion_posts`) through the browser
-session; starting, replying to, editing and deleting posts submit the same
-`mod/forum/post.php` forms as the web UI, and lock/pin/favourite/subscribe call the
-UI's AJAX toggles. Discussion lists and posts are cached like other listings
-(`--no-cache` for fresh ones). `forums post` skips (or `--if-exists error`) when a
-discussion with the same subject exists. `forums reply` warns, and asks before
-posting (`-y` skips), when you already posted a very similar message (>= 80% alike)
-in the discussion. `--attach` on `post`, `reply` and `edit` uploads files like the
-form's file picker (`edit` adds to the existing ones; same-named files are refused);
-`forums show` lists attachment URLs. Deleting a
-discussion's first post deletes the whole discussion. Not implemented: removing attachments,
-splitting/moving discussions, ratings, export, read tracking, group selection.
+Forums are course resources of kind `forum`. Commands follow Moodle's hierarchy:
+`forums` (find them), `discussions` (take a forum cmid, list/read/start/manage its
+discussions), `posts` (take a post id: reply, edit, delete). Forums and discussions
+can also be given as pasted `view.php?id=` / `discuss.php?d=` URLs; ids are shown by
+the listing commands.
+
+Reading uses Moodle's own AJAX service (`mod_forum_get_discussion_posts`) through
+the browser session; starting, replying to, editing and deleting posts submit the
+same `mod/forum/post.php` forms as the web UI, and lock/pin/favourite/subscribe call
+the UI's AJAX toggles. Discussion lists and posts are cached like other listings
+(`--no-cache` for fresh ones).
+
+`discussions add` skips (or `--if-exists error`) when a discussion with the same
+subject exists. `posts reply` warns, and asks before posting (`-y` skips), when you
+already posted a very similar message (>= 80% alike) in the discussion. `--attach`
+on `discussions add`, `posts reply` and `posts edit` uploads files like the form's
+file picker (`edit` adds to the existing ones; same-named files are refused);
+`discussions show` lists attachment URLs. Deleting a discussion's first post deletes
+the whole discussion. Not implemented: removing attachments, splitting/moving
+discussions, ratings, export, read tracking, group selection.
 
 ## Programmatic Python API
 

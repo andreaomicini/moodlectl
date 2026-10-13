@@ -47,7 +47,7 @@ on ubuntu/windows/macos x Python 3.10-3.13, then the semantic-release deploy.
 - Implemented but **not validated against a live Moodle**: resource add/update/inspect
   forms. Their selectors were derived from screenshots of Unibo Virtuale.
 - Supported writes: create `url`, `page` and `resource` (File), update `url` and
-  `resource`. A File's upload reuses the forum attachments' draft upload (`_upload`,
+  `resource`, move any module. A File's upload reuses the forum attachments' draft upload (`_upload`,
   now taking the file field's selector); `update_file` first empties the draft area
   through `draftfiles_ajax.php` (`list`, `delete`), and both writes then download
   `mod/resource/view.php?id=<cmid>&redirect=1` and compare it with the local file.
@@ -56,7 +56,9 @@ on ubuntu/windows/macos x Python 3.10-3.13, then the semantic-release deploy.
   section toggles work only after the `load` event (`_expand_all`), and site CSS hides
   `#fitem_id_visible`, so visibility goes through `core_course_edit_module` show/hide
   (`_set_visible`). `resources list` still reports hidden modules as visible.
-  Other `kind`s go through the generic `modedit.php?add=<kind>` path and need
+  `move_resource` calls `core_courseformat_update_course` (`cm_move`, `targetcmid`) through
+  `AJAX_JS`, the course page's drag and drop, then re-reads the order; validated live on
+  Virtuale (2026-10-13). Other `kind`s go through the generic `modedit.php?add=<kind>` path and need
   site-specific `fields`.
 - Forums (`list_forums`, `list_discussions`, `list_posts`, `add_discussion`, `reply`,
   `edit_post`, `delete_post`, `set_discussion`) were validated live on Virtuale (Moodle

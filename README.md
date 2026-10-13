@@ -143,6 +143,9 @@ moodlectl resources add-file "M5 - Agents" slides/m5.pdf --section "Module 2"
 moodlectl resources update-file 12346 slides/m5.pdf
 moodlectl resources update-file 12346 --fields '{"#id_showsize": true}'  # settings only
 
+# Move modules just above another one, in the order given (as drag and drop does)
+moodlectl resources move 12346 12347 --before 12340
+
 # Create a Page resource (editor support varies per site, see below)
 moodlectl resources add-page "Course info" --content "<p>Hello</p>" --section "Module 2"
 
@@ -326,9 +329,9 @@ with MoodleREST("https://virtuale.unibo.it") as ws:
 
 ## Limitations and operational notes
 
-* Validated live on Virtuale (Moodle 4.5): login, course/section/resource listings
-  and all forum commands. Resource **writes** (`add-url`, `add-page`, `update-url`,
-  `add-file`, `update-file`, `sync`) match screenshots of the forms but are not yet validated live. Site
+* Validated live on Virtuale (Moodle 4.5): login, course/section/resource listings,
+  `resources move` and all forum commands. Resource **writes** (`add-url`, `add-page`,
+  `update-url`, `add-file`, `update-file`, `sync`) match screenshots of the forms but are not yet validated live. Site
   plugins, roles, Moodle versions and updates can change selectors or permissions.
 * Moodle core REST exposes course reading and module management functions,
   but resource creation is not universally exposed as a generic external

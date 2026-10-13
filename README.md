@@ -19,21 +19,53 @@ This is an independent utility, not an official University of Bologna/Moodle int
   this interface, but it neither solves SSO nor supplies an unrestricted
   create-activity endpoint. This project uses a tiny generic REST wrapper instead.
 
-## Setup (macOS, Linux, Python >=3.10)
+## Install
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
+Requires Python >= 3.10 on macOS, Linux or Windows. `moodlectl` is on
+[PyPI](https://pypi.org/project/moodlectl/); install it as a standalone command with
+[uv](https://docs.astral.sh/uv/getting-started/installation/) (recommended) or
+[pipx](https://pipx.pypa.io/), or with plain `pip` into an environment of your choice:
 
 ```bash
-uv sync --all-groups
-uv run playwright install chromium   # optional if Chrome or Edge is installed
-source .venv/bin/activate
+uv tool install moodlectl        # or: pipx install moodlectl
+pip install moodlectl            # e.g. inside a virtual environment
+```
 
+Upgrade later with `uv tool upgrade moodlectl` (or `pipx upgrade moodlectl`,
+`pip install -U moodlectl`).
+
+If PyPI is not an option, install from GitHub instead: the wheel attached to a
+[release](https://github.com/gciatto/moodlectl/releases), or any tag/branch built
+from source:
+
+```bash
+pip install https://github.com/gciatto/moodlectl/releases/download/1.0.0/moodlectl-1.0.0-py3-none-any.whl
+pip install "git+https://github.com/gciatto/moodlectl@main"
+```
+
+(`uv tool install` and `pipx install` accept the same URLs.)
+
+`moodlectl` drives a browser through Playwright. An installed Google Chrome (or
+Microsoft Edge on Windows) is used as is; otherwise install Playwright's Chromium once
+(see `--browser` below for other choices):
+
+```bash
+uvx --from moodlectl playwright install chromium   # uv tool / pipx installs
+python -m playwright install chromium              # pip installs, same environment
+```
+
+## Setup
+
+Point `moodlectl` at your Moodle site and log in once:
+
+```bash
 moodlectl config set-site https://virtuale.unibo.it
 moodlectl login
 ```
 
-`uv sync --all-groups` creates the virtual environment and installs the project,
-test tools, and development tools from `pyproject.toml`.
+To work on `moodlectl` itself, clone the repository and run `uv sync --all-groups`
+instead: it creates `.venv` with the project plus test and development tools (see
+[`AGENTS.md`](AGENTS.md)); prefix commands with `uv run`, or `source .venv/bin/activate`.
 
 `login` opens a **visible, dedicated browser window**. Complete the normal
 Unibo SSO process there, including MFA when requested. When Moodle is visible,

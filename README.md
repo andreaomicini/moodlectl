@@ -69,6 +69,9 @@ moodlectl resources add-url "L2 - My lecture" \
 moodlectl resources update-url 12345 --name "Updated title" \
   --url https://example.org/new.pdf --description '[Slides](https://example.org/)'
 
+# Create a Page resource (editor support varies per site, see below)
+moodlectl resources add-page "Course info" --content "<p>Hello</p>" --section "Module 2"
+
 # Inspect the real URL field, visibility, description etc.
 moodlectl resources show 12345
 
@@ -92,7 +95,7 @@ moodlectl api call mod_url_get_urls_by_courses \
   --params '{"courseids":[80509]}'
 ```
 
-Use `--profile NAME` and `--site URL` **before** the subcommand to select an
+Use `--profile NAME` and `--site URL` (or `MOODLE_SITE_URL`) **before** the subcommand to select an
 independent account or Moodle installation:
 
 ```bash
@@ -104,7 +107,7 @@ moodlectl --profile teaching resources list --section "Module 2"
 The saved default site/course are in
 `~/.config/moodlectl/PROFILE.json` (or `$XDG_CONFIG_HOME`), and the Chromium
 profile is under `~/.local/share/moodlectl/profiles/PROFILE` (or
-`$XDG_DATA_HOME`). Treat the browser profile as an authenticated session.
+`$XDG_DATA_HOME`); `moodlectl config show` prints both. Treat the browser profile as an authenticated session.
 
 ## YAML batch files
 
@@ -158,7 +161,8 @@ with BrowserMoodle(Settings.load()) as moodle:
             print(resource.kind, resource.cmid, resource.name, resource.url)
 
     status = moodle.add_resource(
-        80509, "Module 2",
+        80509,
+        "Module 2",
         ResourceSpec(
             kind="url",
             name="L2 - Agents",
@@ -213,6 +217,9 @@ Unit tests cover manifest validation, HTML table import, configuration and REST 
 serialization. Integration against live Virtuale requires running
 `moodlectl login` locally with an authorized account; no stored credentials
 or Moodle tokens are included.
+
+Contributor/agent notes (code layout, conventions, implementation status) are in
+[`AGENTS.md`](AGENTS.md).
 
 ## Releases and dependency updates
 

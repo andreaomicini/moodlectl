@@ -1,0 +1,76 @@
+# AGENTS.md
+
+Notes for coding agents and contributors. User-facing usage (setup, CLI, YAML
+manifests, Python API, limitations) lives in `README.md`; do not duplicate it here.
+
+## Layout
+
+```
+src/moodlectl/
+  cli.py        Typer app; sub-apps: courses, sections, resources, config, api, manifest.
+                Entry point `main()` turns `moodlectlError` into "Error: ..." + exit 1.
+  browser.py    BrowserMoodle: Playwright persistent-Chromium backend (SSO session).
+                Scrapes course pages (SECTION_JS) and drives /course/modedit.php forms.
+  rest.py       MoodleREST: token-based /webservice/rest/server.php client (httpx),
+                plus flatten_moodle_params() for Moodle's bracket-form params.
+  models.py     Frozen dataclasses: Course, Section, Resource, ResourceSpec (+ validate()).
+  manifest.py   YAML -> Batch(course, section, resources) with strict validation.
+  importers.py  HTML table (title/PDF/online columns) -> Batch; write_manifest() -> YAML.
+  config.py     Settings per profile (XDG paths, 0600/0700 perms), normalized_site().
+  errors.py     moodlectlError (sic, lowercase) and subclasses LoginRequired,
+                AmbiguousMatch, MoodleFormError.
+tests/          pytest unit tests: config, importers, manifest, rest.
+examples/       module2.yaml manifest and python_api.py (writes are commented out).
+```
+
+## Commands
+
+```bash
+uv sync --all-groups          # env + dev tools (CI uses plain `uv sync`)
+uv run poe test               # pytest
+uv run poe static-checks      # compileall, ruff format --check, ruff check, mypy
+uv run poe static-fixes       # ruff --fix + ruff format
+uv run poe coverage && uv run poe coverage-report
+```
+
+CI (`.github/workflows/check.yml`) runs static-checks + coverage on 3.12, then tests
+on ubuntu/windows/macos x Python 3.10-3.13, then the semantic-release deploy.
+
+## Implementation status (as of 2026-10)
+
+- Working and unit-tested: manifest loading/validation, table import, config/profile
+  handling, REST client and param flattening.
+- Implemented but **not covered by tests and not validated against a live Moodle**:
+  everything in `browser.py` (login, course/section scraping, add/update/inspect
+  forms). Selectors were derived from screenshots of Unibo Virtuale.
+- Supported writes: create `url` and `page`, update `url`. Other `kind`s go through
+  the generic `modedit.php?add=<kind>` path and need site-specific `fields`.
+- Not implemented: `label` (rejected in `ResourceSpec.validate()`), file uploads,
+  deletion, section creation, access restrictions.
+- `static-checks` and tests pass; keep it that way before committing.
+
+## Conventions and gotchas
+
+- Raise `moodlectlError` (or a subclass) for anything the user can act on; the CLI
+  prints its message. Never let raw Playwright/httpx exceptions be the UX.
+- Writes must stay non-destructive and idempotent: `add_resource` re-reads the
+  section, dedups on `(kind, name.casefold())`, and verifies the result after save.
+  `resources sync` previews unless `--apply`. Keep that contract.
+- Form helpers: `_locate()` accepts alternatives separated by `" || "` (custom, not
+  Playwright syntax) and raises if none match; `_optional()` returns `None`.
+  `_fill_field()` maps str/number -> fill, bool -> checkbox, `{label|value}` -> select.
+- Unrecognized form controls must raise `MoodleFormError`, never be silently skipped.
+- Security: never handle SSO passwords or export cookies; the Chromium profile dir
+  is the session. `normalized_site()` rejects plain HTTP except localhost.
+  REST token comes only from `MOODLE_WS_TOKEN` or the constructor.
+- Browser runs headed by default (`headless=False`); the CLI does not expose a
+  headless flag.
+- Tests must not hit the network or a browser: use `httpx.MockTransport`-style
+  fakes / static HTML (see `tests/test_rest.py`, `tests/test_importers.py`).
+- Ruff: line length 100, target py310. Code must run on Python 3.10.
+
+## Releases
+
+Conventional Commits drive semantic-release (`release.config.mjs`), which runs
+`uv version <next> && uv build`, then `uv publish`. `pyproject.toml` is the only
+version source; `moodlectl.__version__` reads it via `importlib.metadata`.

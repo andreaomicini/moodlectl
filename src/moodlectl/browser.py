@@ -340,7 +340,8 @@ class BrowserMoodle(AbstractContextManager):
         key = hashlib.sha256(f"{self.site}{path}".encode()).hexdigest()
         file = self.settings.cache_dir / f"{key}.json"
         ttl = 0 if self._wrote else self.settings.cache_ttl
-        if file.is_file() and time.time() - file.stat().st_mtime < ttl:
+        # Explicit ttl check: on Windows a fresh mtime can be ahead of time.time().
+        if ttl > 0 and file.is_file() and time.time() - file.stat().st_mtime < ttl:
             return json.loads(file.read_text("utf-8"))
         data = extract(self._goto(path))
         file.parent.parent.mkdir(exist_ok=True, mode=0o700)

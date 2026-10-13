@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from contextlib import contextmanager
 from dataclasses import asdict
 from typing import Any, Optional, cast
@@ -15,7 +16,7 @@ from .config import Settings, normalized_site
 from .errors import moodlectlError
 from .manifest import load_manifest
 from .importers import import_table, write_manifest
-from .models import Format, ResourceSpec
+from .models import Format, Post, ResourceSpec
 from .rest import MoodleREST
 
 app = typer.Typer(no_args_is_help=True, help="Moodle resources CLI (browser SSO + REST)")
@@ -26,6 +27,7 @@ config = typer.Typer(no_args_is_help=True, help="Manage local configuration")
 api = typer.Typer(no_args_is_help=True, help="Call Moodle native REST web services")
 manifest = typer.Typer(no_args_is_help=True, help="Build declarative YAML manifests")
 cache = typer.Typer(no_args_is_help=True, help="Manage the local page cache")
+forums = typer.Typer(no_args_is_help=True, help="Read and write forum discussions and posts")
 app.add_typer(courses, name="courses")
 app.add_typer(sections, name="sections")
 app.add_typer(resources, name="resources")
@@ -33,6 +35,7 @@ app.add_typer(config, name="config")
 app.add_typer(api, name="api")
 app.add_typer(manifest, name="manifest")
 app.add_typer(cache, name="cache")
+app.add_typer(forums, name="forums")
 
 
 @app.callback()
@@ -82,8 +85,21 @@ def browser(ctx: typer.Context):
         yield moodle
 
 
+class _Dumper(yaml.SafeDumper):
+    pass
+
+
+# Multi-line strings (e.g. forum messages) as readable `|` blocks instead of escaped lines.
+_Dumper.add_representer(
+    str,
+    lambda d, s: d.represent_scalar("tag:yaml.org,2002:str", s, style="|" if "\n" in s else None),
+)
+
+
 def _print(value: Any) -> None:
-    typer.echo(yaml.safe_dump(value, allow_unicode=True, sort_keys=False, width=1000), nl=False)
+    typer.echo(
+        yaml.dump(value, Dumper=_Dumper, allow_unicode=True, sort_keys=False, width=1000), nl=False
+    )
 
 
 @app.command()
@@ -277,6 +293,169 @@ def update_url(
             fields=_parse_json_object(fields),
         )
     typer.echo(f"updated: {cmid}")
+
+
+@forums.command("list")
+def forums_list(ctx: typer.Context, course: Optional[int] = typer.Option(None, "--course")):
+    """List the course's forums (their cmid selects them in other commands)."""
+    with browser(ctx) as moodle:
+        _print([asdict(r) for r in moodle.list_forums(_cid(ctx, course))])
+
+
+@forums.command("discussions")
+def forums_discussions(ctx: typer.Context, forum: int = typer.Argument(..., help="Forum cmid")):
+    """List a forum's discussions, with authors, dates, replies and states."""
+    with browser(ctx) as moodle:
+        _print([asdict(d) for d in moodle.list_discussions(forum)])
+
+
+@forums.command("show")
+def forums_show(
+    ctx: typer.Context,
+    discussion: int = typer.Argument(..., help="Discussion id"),
+    html: bool = typer.Option(False, "--html", help="Print messages as Moodle's HTML"),
+):
+    """Show a discussion's posts (oldest first) with authors and metadata."""
+    with browser(ctx) as moodle:
+        _print([asdict(x) for x in moodle.list_posts(discussion, html=html)])
+
+
+def _text(value: str | None) -> str | None:
+    return sys.stdin.read() if value == "-" else value
+
+
+_MESSAGE_HELP = "Message text, or - to read it from stdin"
+_FORMAT_HELP = "markdown, html, plain or auto"
+_ATTACH_HELP = "File to attach (repeatable)"
+
+
+@forums.command("post")
+def forums_post(
+    ctx: typer.Context,
+    forum: int = typer.Argument(..., help="Forum cmid"),
+    subject: str = typer.Argument(...),
+    message: str = typer.Option(..., "--message", "-m", help=_MESSAGE_HELP),
+    text_format: str = typer.Option("markdown", "--format", help=_FORMAT_HELP),
+    if_exists: str = typer.Option("skip", "--if-exists", help="skip or error"),
+    attach: list[str] = typer.Option([], "--attach", "-a", help=_ATTACH_HELP),
+):
+    """Start a new discussion (skipped if one with the same subject exists)."""
+    if if_exists not in ("skip", "error"):
+        raise moodlectlError("--if-exists supports skip or error")
+    with browser(ctx) as moodle:
+        result, discussion = moodle.add_discussion(
+            forum,
+            subject,
+            _text(message) or "",
+            text_format=text_format,
+            if_exists=if_exists,
+            attachments=attach,
+        )
+    _print({result: {"discussion": discussion, "subject": subject}})
+
+
+@forums.command("reply")
+def forums_reply(
+    ctx: typer.Context,
+    post: int = typer.Argument(..., help="Post id to reply to"),
+    message: str = typer.Option(..., "--message", "-m", help=_MESSAGE_HELP),
+    subject: Optional[str] = typer.Option(None, "--subject", help="Default: Re: <subject>"),
+    private: bool = typer.Option(False, "--private", help="Visible to the author only"),
+    text_format: str = typer.Option("markdown", "--format", help=_FORMAT_HELP),
+    attach: list[str] = typer.Option([], "--attach", "-a", help=_ATTACH_HELP),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Post even if you said the same"),
+):
+    """Reply to a post; warns first if you already posted a very similar message."""
+
+    def confirm_similar(similar: list[Post]) -> bool:
+        typer.echo("Warning: you already posted a very similar message here:", err=True)
+        typer.echo(
+            yaml.dump(
+                [asdict(x) for x in similar],
+                Dumper=_Dumper,
+                allow_unicode=True,
+                sort_keys=False,
+                width=1000,
+            ),
+            err=True,
+            nl=False,
+        )
+        return yes or typer.confirm("Post anyway?", default=False, err=True)
+
+    with browser(ctx) as moodle:
+        new = moodle.reply(
+            post,
+            _text(message) or "",
+            subject=subject,
+            private=private,
+            text_format=text_format,
+            attachments=attach,
+            confirm_similar=confirm_similar,
+        )
+    if new is None:
+        typer.echo("aborted")
+        raise typer.Exit(1)
+    _print({"created": {"post": new, "parent": post}})
+
+
+@forums.command("edit")
+def forums_edit(
+    ctx: typer.Context,
+    post: int = typer.Argument(..., help="Post id"),
+    message: Optional[str] = typer.Option(None, "--message", "-m", help=_MESSAGE_HELP),
+    subject: Optional[str] = typer.Option(None, "--subject"),
+    text_format: str = typer.Option("markdown", "--format", help=_FORMAT_HELP),
+    attach: list[str] = typer.Option([], "--attach", "-a", help="File to add (repeatable)"),
+):
+    """Change a post's subject and/or message, or add attachments (the rest is kept)."""
+    with browser(ctx) as moodle:
+        moodle.edit_post(
+            post,
+            subject=subject,
+            message=_text(message),
+            text_format=text_format,
+            attachments=attach,
+        )
+    typer.echo(f"updated: {post}")
+
+
+@forums.command("delete")
+def forums_delete(
+    ctx: typer.Context,
+    post: int = typer.Argument(..., help="Post id (a first post deletes its discussion)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask for confirmation"),
+):
+    """Delete a post and its replies, after showing Moodle's confirmation."""
+
+    def confirm(text: str) -> bool:
+        if yes:
+            return True
+        typer.echo(text)
+        return typer.confirm("Delete?", default=False)
+
+    with browser(ctx) as moodle:
+        deleted = moodle.delete_post(post, confirm)
+    typer.echo(f"deleted: {post}" if deleted else "aborted")
+
+
+@forums.command("set")
+def forums_set(
+    ctx: typer.Context,
+    discussion: int = typer.Argument(..., help="Discussion id"),
+    locked: Optional[bool] = typer.Option(None, "--lock/--unlock"),
+    pinned: Optional[bool] = typer.Option(None, "--pin/--unpin"),
+    favourite: Optional[bool] = typer.Option(None, "--favourite/--unfavourite"),
+    subscribed: Optional[bool] = typer.Option(None, "--subscribe/--unsubscribe"),
+):
+    """Lock, pin, star or subscribe to a discussion."""
+    if (locked, pinned, favourite, subscribed) == (None,) * 4:
+        raise moodlectlError("Nothing to set; see --help")
+    with browser(ctx) as moodle:
+        _print(
+            moodle.set_discussion(
+                discussion, locked=locked, pinned=pinned, favourite=favourite, subscribed=subscribed
+            )
+        )
 
 
 def _parse_json_object(raw: str) -> dict:

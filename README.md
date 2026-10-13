@@ -99,6 +99,18 @@ moodlectl resources add-page "Course info" --content "<p>Hello</p>" --section "M
 # Inspect the real URL field, visibility, description etc.
 moodlectl resources show 12345
 
+# Forums: list them, their discussions, and a discussion's posts (as plain text, or --html)
+moodlectl forums list
+moodlectl forums discussions 2263032          # forum cmid
+moodlectl forums show 230424                  # discussion id
+# Write: start a discussion, reply (optionally privately), edit, delete, set states
+moodlectl forums post 2263032 "Office hours" -m "Moved to **Friday**"   # --format markdown
+moodlectl forums reply 315396 -m "Thanks!" --private                     # post id
+moodlectl forums reply 315396 -m "Slides attached" -a l1.pdf -a l2.pdf  # --attach, repeatable
+echo "Longer text" | moodlectl forums edit 315849 -m - --subject "New subject"
+moodlectl forums delete 315849                # asks after showing Moodle's confirmation; -y skips
+moodlectl forums set 230424 --lock --pin --favourite --unsubscribe
+
 # Course and section listings are cached per URL for 1h (in the temp dir)
 moodlectl --cache-ttl 600 sections list   # or MOODLE_CACHE_TTL=600
 moodlectl --no-cache sections list        # or MOODLE_NO_CACHE=1; refreshes the cache
@@ -176,6 +188,23 @@ Atto contenteditable and TinyMCE iframe configurations.
 an expendable course first. File uploads, labels, activity deletion, complex
 access restrictions and section creation are not implemented. Custom form
 fields accommodate additional activity settings where Moodle exposes them.
+
+## Forums
+
+Forums are course resources of kind `forum`; commands take the forum's cmid, a
+discussion id, or a post id (all shown by the listing commands). Reading uses
+Moodle's own AJAX service (`mod_forum_get_discussion_posts`) through the browser
+session; starting, replying to, editing and deleting posts submit the same
+`mod/forum/post.php` forms as the web UI, and lock/pin/favourite/subscribe call the
+UI's AJAX toggles. Discussion lists and posts are cached like other listings
+(`--no-cache` for fresh ones). `forums post` skips (or `--if-exists error`) when a
+discussion with the same subject exists. `forums reply` warns, and asks before
+posting (`-y` skips), when you already posted a very similar message (>= 80% alike)
+in the discussion. `--attach` on `post`, `reply` and `edit` uploads files like the
+form's file picker (`edit` adds to the existing ones; same-named files are refused);
+`forums show` lists attachment URLs. Deleting a
+discussion's first post deletes the whole discussion. Not implemented: removing attachments,
+splitting/moving discussions, ratings, export, read tracking, group selection.
 
 ## Programmatic Python API
 

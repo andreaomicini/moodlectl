@@ -72,3 +72,36 @@ class ResourceSpec:
             raise moodlectlError("Invalid description_format")
         if not isinstance(self.fields, dict):
             raise moodlectlError("fields must be a mapping")
+
+
+@dataclass(frozen=True)
+class Discussion:
+    id: int
+    subject: str
+    author: str
+    created: str | None
+    last_author: str
+    modified: str | None
+    replies: int | None
+    url: str
+    locked: bool | None = None
+    pinned: bool | None = None
+    favourite: bool | None = None
+    subscribed: bool | None = None
+
+
+@dataclass(frozen=True)
+class Post:
+    id: int
+    discussion: int
+    parent: int | None
+    subject: str
+    author: str
+    created: str
+    modified: str
+    message: str
+    private: bool = False
+    deleted: bool = False
+    attachments: tuple[str, ...] = ()
+    can: tuple[str, ...] = ()  # actions allowed to the current user (edit, delete, reply, ...)
+    url: str = ""

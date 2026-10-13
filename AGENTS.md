@@ -7,19 +7,21 @@ manifests, Python API, limitations) lives in `README.md`; do not duplicate it he
 
 ```
 src/moodlectl/
-  cli.py        Typer app; sub-apps: courses, sections, resources, config, api, manifest.
+  cli.py        Typer app; sub-apps: courses, sections, resources, forums, config, api,
+                manifest, cache.
                 Entry point `main()` turns `moodlectlError` into "Error: ..." + exit 1.
   browser.py    BrowserMoodle: Playwright persistent-browser backend (SSO session).
                 Scrapes course pages (SECTION_JS) and drives /course/modedit.php forms.
   rest.py       MoodleREST: token-based /webservice/rest/server.php client (httpx),
                 plus flatten_moodle_params() for Moodle's bracket-form params.
-  models.py     Frozen dataclasses: Course, Section, Resource, ResourceSpec (+ validate()).
+  models.py     Frozen dataclasses: Course, Section, Resource, ResourceSpec (+ validate()),
+                Discussion, Post.
   manifest.py   YAML -> Batch(course, section, resources) with strict validation.
   importers.py  HTML table (title/PDF/online columns) -> Batch; write_manifest() -> YAML.
   config.py     Settings per profile (XDG paths, 0600/0700 perms), normalized_site().
   errors.py     moodlectlError (sic, lowercase) and subclasses LoginRequired,
                 AmbiguousMatch, MoodleFormError.
-tests/          pytest unit tests: config, importers, manifest, rest.
+tests/          pytest unit tests: browser, config, forums, importers, manifest, rest.
 examples/       module2.yaml manifest and python_api.py (writes are commented out).
 ```
 
@@ -45,6 +47,14 @@ on ubuntu/windows/macos x Python 3.10-3.13, then the semantic-release deploy.
   forms). Selectors were derived from screenshots of Unibo Virtuale.
 - Supported writes: create `url` and `page`, update `url`. Other `kind`s go through
   the generic `modedit.php?add=<kind>` path and need site-specific `fields`.
+- Forums (`list_forums`, `list_discussions`, `list_posts`, `add_discussion`, `reply`,
+  `edit_post`, `delete_post`, `set_discussion`) were validated live on Virtuale (Moodle
+  4.5). There only flagged-`ajax` web services work via `AJAX_JS`: the post listing and
+  lock/pin/favourite/subscribe toggles do; get_forums/add_discussion/update/delete
+  answer `servicenotavailable`, so writes submit `form#mformforum` via `POST_FORM_JS`.
+  `mod_forum_set_lock_state`'s `targetstate` is the current lock time (0 locks).
+  Attachments go to the form's draft itemid via `repository_ajax.php?action=upload`
+  (`page.request`, same cookies), repo id scraped from the page's filepicker options.
 - Not implemented: `label` (rejected in `ResourceSpec.validate()`), file uploads,
   deletion, section creation, access restrictions.
 - `static-checks` and tests pass; keep it that way before committing.

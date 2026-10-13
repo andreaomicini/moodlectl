@@ -2,22 +2,28 @@ from __future__ import annotations
 
 import hashlib
 import json
+import mimetypes
 import os
 import re
 import shutil
 import sys
 import time
+import warnings
 from contextlib import AbstractContextManager
+from datetime import datetime
+from difflib import SequenceMatcher
+from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 from getpass import getpass
-from typing import Any
+from typing import Any, Callable, Sequence
 
 from playwright.sync_api import sync_playwright, Page, Locator, TimeoutError as PWTimeout
 from playwright.sync_api import Error as PWError
+from bs4 import BeautifulSoup
 
 from .config import Settings
 from .errors import AmbiguousMatch, LoginRequired, moodlectlError, MoodleFormError
-from .models import Course, Resource, ResourceSpec, Section
+from .models import Course, Discussion, Post, Resource, ResourceSpec, Section
 
 
 # Engines Playwright drives with its own builds; any other name is a Chromium channel
@@ -86,6 +92,119 @@ SECTION_JS = r"""() => {
  }
  return result;
 }"""
+
+
+# Moodle AJAX call with the page's session; only functions flagged `ajax` work here.
+AJAX_JS = r"""async ([methodname, args]) => {
+ const r = await fetch(M.cfg.wwwroot + '/lib/ajax/service.php?sesskey=' + M.cfg.sesskey, {
+  method: 'POST', body: JSON.stringify([{index: 0, methodname, args}])});
+ return (await r.json())[0];
+}"""
+
+
+# Rows of a forum's discussion list (mod/forum/view.php), plus whether a next page exists.
+DISCUSSIONS_JS = r"""(page) => {
+ const txt = e => (e?.textContent || '').replace(/\s+/g, ' ').trim();
+ const ts = e => e ? Number(e.dataset.timestamp) || null : null;
+ const target = (row, type) => row.querySelector(`[data-type="${type}"]`)?.dataset.targetstate;
+ // Replies column: the one sorted by o=5/6 (reply count).
+ const col = [...document.querySelectorAll('table.discussion-list thead th')]
+  .findIndex(th => th.querySelector('a[href*="o=5"], a[href*="o=6"]'));
+ const rows = [...document.querySelectorAll('tr[data-region="discussion-list-item"]')].map(row => {
+  const people = row.querySelectorAll('.author-info');
+  const lock = row.querySelector('[data-type="lock-toggle"]');
+  const fav = target(row, 'favorite-toggle'), pin = target(row, 'pin-toggle');
+  const sub = row.querySelector('[data-type="subscription-toggle"]');
+  return {id: Number(row.dataset.discussionid), subject: txt(row.querySelector('th.topic a')),
+   author: txt(people[0]?.firstElementChild), created: ts(people[0]?.querySelector('time')),
+   last_author: txt(people[1]?.firstElementChild), modified: ts(people[1]?.querySelector('time')),
+   replies: col < 0 ? null : parseInt(txt(row.cells[col])) || 0,
+   url: row.querySelector('th.topic a')?.href,
+   locked: lock ? lock.dataset.state !== '0'
+     : !row.querySelector('[data-region="locked-label"]')?.hidden,
+   pinned: pin === undefined ? null : pin === '0',
+   favourite: fav === undefined ? null : fav === '0',
+   subscribed: sub ? sub.checked : null};
+ });
+ const next = [...document.querySelectorAll('.pagination a[href]')]
+  .some(a => new URL(a.href).searchParams.get('p') === String(page + 1));
+ return {rows, next};
+}"""
+
+
+# Submit the page's forum post form (add discussion, reply, edit) with `values` overriding
+# its fields, like the web UI does, bypassing the rich-text editor widget.
+POST_FORM_JS = r"""async (values) => {
+ const form = document.querySelector('form#mformforum');
+ if (!form) return {missing: ['form#mformforum']};
+ const missing = Object.keys(values).filter(k => !form.elements[k]);
+ if (missing.length) return {missing};
+ const data = new FormData(form);
+ for (const [k, v] of Object.entries(values)) data.set(k, v);
+ data.set('submitbutton', form.elements.submitbutton.value);
+ const r = await fetch(form.action, {method: 'POST', body: data});
+ const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+ const errors = [...doc.querySelectorAll('.invalid-feedback, .alert-danger, .errorbox')]
+  .map(e => e.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
+ return {url: r.url, errors};
+}"""
+
+# Moodle FORMAT_* constants: 0=Moodle auto-format, 1=HTML, 2=plain, 4=Markdown.
+TEXT_FORMATS = {"auto": "0", "html": "1", "plain": "2", "markdown": "4"}
+
+
+def _time(ts: int | None) -> str | None:
+    return datetime.fromtimestamp(ts).astimezone().isoformat(timespec="minutes") if ts else None
+
+
+def html_text(html: str) -> str:
+    """Readable plain text of a Moodle post body: paragraphs, line breaks, bullets."""
+    # ponytail: drops <pre> indentation and table layout; use --html to see the original.
+    soup = BeautifulSoup(html, "html.parser")
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
+    for li in soup.find_all("li"):
+        # \0 marks indentation, so that stripping source whitespace below keeps it.
+        li.insert(0, "\0\0" * (len(li.find_parents(["ul", "ol"])) - 1) + "- ")
+    for block in soup.find_all(["p", "div", "li", "tr", "pre", "blockquote", "h1", "h2", "h3"]):
+        block.append("\n")
+    text = "\n".join(line.strip() for line in soup.get_text().splitlines()).replace("\0", " ")
+    text = re.sub(r"\n\n+(?= *- )", "\n", text)  # no blank lines between list items
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def similarity(a: str, b: str) -> float:
+    """0..1 likeness of two messages, ignoring case, spacing and Markdown emphasis marks."""
+    # ponytail: character diff of the plain texts; fine for "did I already say this?".
+    x, y = (" ".join(re.sub(r"[*_`#>]", "", t).casefold().split()) for t in (a, b))
+    return SequenceMatcher(None, x, y).ratio()
+
+
+SIMILAR = 0.8  # replies at least this similar to one by the same user trigger a warning
+
+
+def _post(x: dict, html: bool = False) -> Post:
+    return Post(
+        id=x["id"],
+        discussion=x["discussionid"],
+        parent=x["parentid"],
+        subject=x["subject"],
+        author=x["author"]["fullname"],
+        created=_time(x["timecreated"]) or "",
+        modified=_time(x["timemodified"]) or "",
+        message=x["message"] if html else html_text(x["message"] or ""),
+        private=x["isprivatereply"],
+        deleted=x["isdeleted"],
+        attachments=tuple(a["url"] for a in x.get("attachments") or ()),
+        can=tuple(k for k, v in x["capabilities"].items() if v is True),
+        url=x["urls"]["view"],
+    )
+
+
+def _warn_similar(similar: list[Post]) -> bool:
+    ids = ", ".join(str(x.id) for x in similar)
+    warnings.warn(f"You already posted a very similar reply in this discussion: {ids}")
+    return True
 
 
 # One terminal-login step: tag visible text fields and clickable elements with
@@ -665,3 +784,296 @@ class BrowserMoodle(AbstractContextManager):
         self._save(p)
         if not any(r.cmid == cmid for r in self.list_resources(course_id)):
             raise MoodleFormError(f"Resource cmid={cmid} missing after edit; inspect manually")
+
+    # --- Forums -------------------------------------------------------------------------
+
+    @staticmethod
+    def _ajax(p: Page, name: str, **args: Any) -> Any:
+        res = p.evaluate(AJAX_JS, [name, args])
+        if not res or res.get("error"):
+            message = (res or {}).get("exception", {}).get("message", "no response")
+            raise moodlectlError(f"Moodle refused {name}: {message}")
+        return res["data"]
+
+    def list_forums(self, course_id: int) -> list[Resource]:
+        return [r for r in self.list_resources(course_id) if r.kind == "forum"]
+
+    def list_discussions(self, forum_cmid: int) -> list[Discussion]:
+        """All discussions of the forum with course-module id `forum_cmid`, every page."""
+        rows: list[dict] = []
+        page = 0
+        while True:
+            path = f"/mod/forum/view.php?id={int(forum_cmid)}&p={page}"
+            data = self._scrape(path, lambda p, n=page: p.evaluate(DISCUSSIONS_JS, n))
+            rows += data["rows"]
+            if not data["next"]:
+                break
+            page += 1
+        for r in rows:
+            r["created"], r["modified"] = _time(r["created"]), _time(r["modified"])
+        return [Discussion(**r) for r in rows]
+
+    def _raw_posts(self, p: Page, discussion_id: int) -> dict:
+        return self._ajax(
+            p,
+            "mod_forum_get_discussion_posts",
+            discussionid=int(discussion_id),
+            sortby="created",
+            sortdirection="ASC",
+        )
+
+    def list_posts(self, discussion_id: int, *, html: bool = False) -> list[Post]:
+        """Posts of a discussion, oldest first; message as plain text unless `html`."""
+        path = f"/mod/forum/discuss.php?d={int(discussion_id)}"
+        raw = self._scrape(path, lambda p: self._raw_posts(p, discussion_id))["posts"]
+        return [_post(x, html) for x in raw]
+
+    def _submit_post(
+        self,
+        path: str,
+        values: dict[str, str],
+        p: Page | None = None,
+        attachments: Sequence[Path] = (),
+    ) -> None:
+        """Submit the forum post form at `path` (already open as `p`, if given)."""
+        self._writing()
+        p = p or self._goto(path)
+        self._upload(p, attachments)
+        res = p.evaluate(POST_FORM_JS, values)
+        if res.get("missing"):
+            detail = f": {self._main_text(p)}" if "form#mformforum" in res["missing"] else ""
+            raise MoodleFormError(f"Moodle post form at {path} lacks {res['missing']}{detail}")
+        if "/mod/forum/post.php" in urlsplit(res["url"]).path:
+            raise MoodleFormError(
+                "Moodle rejected the post: " + (" | ".join(res["errors"]) or "unknown error")
+            )
+
+    def _upload(self, p: Page, files: Sequence[Path]) -> None:
+        """Upload `files` into the open post form's attachments draft area, like its
+        file picker's "Upload a file" does."""
+        if not files:
+            return
+        field = self._optional(p, 'form#mformforum input[name="attachments"]')
+        if field is None:
+            raise MoodleFormError("This Moodle post form does not accept attachments")
+        repo = re.search(r'"(\d+)":\{"id":"\d+","name":"[^"]*","type":"upload"', p.content())
+        if not repo:
+            raise MoodleFormError("Moodle offers no file upload repository on this form")
+        sesskey, context = p.evaluate("() => [M.cfg.sesskey, M.cfg.contextid]")
+        for file in files:
+            res = p.request.post(
+                f"{self.site}/repository/repository_ajax.php?action=upload",
+                multipart={
+                    "repo_upload_file": {
+                        "name": file.name,
+                        "mimeType": mimetypes.guess_type(file.name)[0]
+                        or "application/octet-stream",
+                        "buffer": file.read_bytes(),
+                    },
+                    "sesskey": sesskey,
+                    "repo_id": repo[1],
+                    "itemid": field.input_value(),
+                    "ctx_id": str(context),
+                    "savepath": "/",
+                    "title": file.name,
+                },
+            )
+            try:
+                data = res.json()
+            except ValueError:
+                data = {"error": f"HTTP {res.status}"}
+            if "error" in data or data.get("event") == "fileexists":
+                problem = data.get("error") or "a file with that name is already attached"
+                raise moodlectlError(f"Moodle refused to upload {file}: {problem}")
+
+    @staticmethod
+    def _files(paths: Sequence[str | Path]) -> list[Path]:
+        files = [Path(f) for f in paths]
+        missing = [str(f) for f in files if not f.is_file()]
+        if missing:
+            raise moodlectlError(f"Attachment not found: {', '.join(missing)}")
+        return files
+
+    @staticmethod
+    def _main_text(p: Page) -> str:
+        main = p.locator('[role="main"]').first
+        text = main.inner_text() if main.count() else p.title()
+        return re.sub(r"\s*\n\s*", "\n", text).strip()[:1000]
+
+    @staticmethod
+    def _message_values(message: str | None, text_format: str) -> dict[str, str]:
+        if message is None:
+            return {}
+        if text_format not in TEXT_FORMATS:
+            raise moodlectlError(f"Invalid format {text_format!r}; use {list(TEXT_FORMATS)}")
+        if not message.strip():
+            raise moodlectlError("Message must not be blank")
+        return {"message[text]": message, "message[format]": TEXT_FORMATS[text_format]}
+
+    def add_discussion(
+        self,
+        forum_cmid: int,
+        subject: str,
+        message: str,
+        *,
+        text_format: str = "markdown",
+        if_exists: str = "skip",
+        attachments: Sequence[str | Path] = (),
+    ) -> tuple[str, int]:
+        """Start a discussion; skip or error if one with the same subject exists.
+
+        Return ('created' | 'skipped', discussion id).
+        """
+        if not subject.strip():
+            raise moodlectlError("Subject must not be blank")
+        values = {"subject": subject, **self._message_values(message, text_format)}
+        files = self._files(attachments)
+        self._writing()
+        before = {d.id: d for d in self.list_discussions(forum_cmid)}
+        same = [d for d in before.values() if d.subject.casefold() == subject.casefold()]
+        if same:
+            if if_exists == "skip":
+                return "skipped", same[0].id
+            raise moodlectlError(f"Discussion already exists: {subject!r} (id {same[0].id})")
+        # The forum page's inline "Add discussion" form names the forum instance; its
+        # full ("Advanced") form at post.php also takes attachments.
+        p = self._goto(f"/mod/forum/view.php?id={int(forum_cmid)}")
+        forum = p.evaluate("() => document.forms.mformforum?.forum?.value")
+        if not forum:
+            raise MoodleFormError(f"Cannot start a discussion here: {self._main_text(p)}")
+        self._submit_post(f"/mod/forum/post.php?forum={forum}", values, attachments=files)
+        new = [d.id for d in self.list_discussions(forum_cmid) if d.id not in before]
+        if len(new) != 1:
+            raise MoodleFormError(f"Posted, but cannot identify the new discussion: {new}")
+        return "created", new[0]
+
+    def reply(
+        self,
+        post_id: int,
+        message: str,
+        *,
+        subject: str | None = None,
+        private: bool = False,
+        text_format: str = "markdown",
+        attachments: Sequence[str | Path] = (),
+        confirm_similar: Callable[[list[Post]], bool] = _warn_similar,
+    ) -> int | None:
+        """Reply to a post (privately to its author if `private`); return the new post id.
+
+        If the current user already posted a very similar message in the discussion,
+        `confirm_similar(those posts)` decides whether to go on (default: warn and post);
+        return None if it declines.
+        """
+        values = self._message_values(message, text_format)
+        files = self._files(attachments)
+        if subject is not None:
+            values["subject"] = subject  # default: Moodle's "Re: <parent subject>"
+        if private:
+            values["isprivatereply"] = "1"
+        self._writing()
+        path = f"/mod/forum/post.php?reply={int(post_id)}"
+        p = self._goto(path)
+        discussion = p.evaluate("() => Number(document.forms.mformforum?.discussion?.value)")
+        if not discussion:
+            raise MoodleFormError(f"Cannot reply to post {post_id}: {self._main_text(p)}")
+        posts = self._raw_posts(p, discussion)["posts"]
+        me = p.evaluate("() => M.cfg.userId")
+        similar = [
+            _post(x)
+            for x in posts
+            if x["author"]["id"] == me
+            and not x["isdeleted"]
+            and similarity(message, html_text(x["message"] or "")) >= SIMILAR
+        ]
+        if similar and not confirm_similar(similar):
+            return None
+        before = {x["id"] for x in posts}
+        self._submit_post(path, values, p, files)
+        new = [x for x in self._raw_posts(p, discussion)["posts"] if x["id"] not in before]
+        if len(new) != 1:
+            raise MoodleFormError(f"Replied, but cannot identify the new post: {new}")
+        if len(new[0]["attachments"] or ()) != len(files):
+            raise MoodleFormError(f"Post {new[0]['id']} lacks some attachments; inspect it")
+        return new[0]["id"]
+
+    def edit_post(
+        self,
+        post_id: int,
+        *,
+        subject: str | None = None,
+        message: str | None = None,
+        text_format: str = "markdown",
+        attachments: Sequence[str | Path] = (),
+    ) -> None:
+        """Change only the supplied subject and/or message of a post; add `attachments`."""
+        values = self._message_values(message, text_format)
+        files = self._files(attachments)
+        if subject is not None:
+            if not subject.strip():
+                raise moodlectlError("Subject must not be blank")
+            values["subject"] = subject
+        if not values and not files:
+            raise moodlectlError("Nothing to edit: give a subject, a message or attachments")
+        self._submit_post(f"/mod/forum/post.php?edit={int(post_id)}", values, attachments=files)
+
+    def delete_post(self, post_id: int, confirm: Any = lambda _text: True) -> bool:
+        """Delete a post; deleting a discussion's first post deletes the whole discussion.
+
+        `confirm(text)` gets Moodle's confirmation page text; returning False aborts.
+        """
+        self._writing()
+        p = self._goto(f"/mod/forum/post.php?delete={int(post_id)}")
+        button = self._optional(p, 'form:has(input[name="confirm"]) [type="submit"]')
+        if button is None:
+            raise MoodleFormError(f"Cannot delete post {post_id}: {self._main_text(p)}")
+        if not confirm(self._main_text(p)):
+            return False
+        button.click()
+        p.wait_for_load_state("domcontentloaded")
+        if "/mod/forum/post.php" in urlsplit(p.url).path:
+            raise MoodleFormError(f"Moodle did not delete post {post_id}: {self._main_text(p)}")
+        return True
+
+    def set_discussion(
+        self,
+        discussion_id: int,
+        *,
+        locked: bool | None = None,
+        pinned: bool | None = None,
+        favourite: bool | None = None,
+        subscribed: bool | None = None,
+    ) -> dict[str, bool]:
+        """Lock, pin, favourite and/or subscribe a discussion; return the resulting states."""
+        self._writing()
+        d = int(discussion_id)
+        p = self._goto(f"/mod/forum/discuss.php?d={d}")
+        forum = self._raw_posts(p, d)["forumid"]
+        state: dict[str, bool] = {}
+        if locked is not None:
+            # Moodle's targetstate is the current lock time: nonzero unlocks, 0 locks.
+            res = self._ajax(
+                p,
+                "mod_forum_set_lock_state",
+                forumid=forum,
+                discussionid=d,
+                targetstate=0 if locked else 1,
+            )
+            state["locked"] = res["locked"]
+        if pinned is not None:
+            res = self._ajax(p, "mod_forum_set_pin_state", discussionid=d, targetstate=int(pinned))
+            state["pinned"] = res["pinned"]
+        if favourite is not None:
+            res = self._ajax(
+                p, "mod_forum_toggle_favourite_state", discussionid=d, targetstate=favourite
+            )
+            state["favourite"] = res["userstate"]["favourited"]
+        if subscribed is not None:
+            res = self._ajax(
+                p,
+                "mod_forum_set_subscription_state",
+                forumid=forum,
+                discussionid=d,
+                targetstate=subscribed,
+            )
+            state["subscribed"] = res["userstate"]["subscribed"]
+        return state

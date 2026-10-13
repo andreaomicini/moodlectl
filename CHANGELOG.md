@@ -1,3 +1,18 @@
+## [1.1.0](https://github.com/gciatto/moodlectl/compare/1.0.0...1.1.0) (2026-10-13)
+
+### Features
+
+* human-readable listings with --pretty ([42b10bc](https://github.com/gciatto/moodlectl/commit/42b10bcb1c156fc70da69ff9a1147f7f127269ef))
+* sort listings with --sort KEY and --reverse ([4874dcd](https://github.com/gciatto/moodlectl/commit/4874dcdf4137e0b4ef569069d7e079c3363a3cec))
+
+### Build and continuous integration
+
+* upload only the wheel and sdist to GitHub releases ([73ac6ad](https://github.com/gciatto/moodlectl/commit/73ac6ad9edd08eaa6029ee5ae82ffd013a5e7cbe))
+
+### General maintenance
+
+* **readme:** add install instructions ([425aac3](https://github.com/gciatto/moodlectl/commit/425aac32b9c66770126a155715e3cba494c6ccc3))
+
 ## 1.0.0 (2026-10-13)
 
 ### Features

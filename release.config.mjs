@@ -31,7 +31,8 @@ if (!dryRun) {
     [
       "@semantic-release/github",
       {
-        assets: [{ path: "dist/*" }],
+        // Not dist/*: `uv build` also writes dist/.gitignore, which would be uploaded.
+        assets: [{ path: "dist/*.whl" }, { path: "dist/*.tar.gz" }],
       },
     ],
     [

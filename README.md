@@ -106,6 +106,9 @@ between engines (Chromium, Chrome and Edge share one).
 
 Commands print their results as YAML (multi-line texts, such as forum messages, as
 `|` blocks), so they are readable and can be piped to tools like `yq`.
+Listings accept `--sort KEY` (any key of the listed items) and `--reverse`. Dates sort
+most recent first. Defaults: courses by `name`, sections by `number`, discussions by
+`modified`; resources and forums stay in page order, posts in chronological order.
 
 ```bash
 # Read courses from your My Courses view (this view may be paginated)

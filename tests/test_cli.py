@@ -42,3 +42,17 @@ def test_headless_default_depends_on_command(tmp_path, monkeypatch, args, env, h
     result = CliRunner().invoke(cli.app, args, env=env)
     assert result.exit_code == 0, result.output
     assert FakeMoodle.seen == [headless]
+
+
+def test_sorted_defaults_and_errors():
+    rows = [
+        {"name": "b", "modified": "2026-01-02T10:00+02:00"},
+        {"name": "A", "modified": None},
+        {"name": "c", "modified": "2026-03-01T10:00+02:00"},
+    ]
+    assert [r["name"] for r in cli._sorted(rows, "name", False)] == ["A", "b", "c"]
+    assert [r["name"] for r in cli._sorted(rows, "modified", False)] == ["c", "b", "A"]
+    assert [r["name"] for r in cli._sorted(rows, "modified", True)] == ["b", "c", "A"]
+    assert cli._sorted(rows, None, True) == rows[::-1]
+    with pytest.raises(cli.moodlectlError, match="choose one of: name, modified"):
+        cli._sorted(rows, "nope", False)

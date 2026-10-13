@@ -111,6 +111,36 @@ def _print(value: Any) -> None:
     )
 
 
+# Keys sorted most recent first by default; everything else ascending.
+_CHRONO = {"created", "modified", "academic_year"}
+
+
+def _sort_option(default: str | None) -> Any:
+    return typer.Option(
+        default,
+        "--sort",
+        help="Sort by this key of the listed items (dates: most recent first)"
+        + ("" if default else "; default: page order"),
+    )
+
+
+_REVERSE = typer.Option(False, "--reverse", help="Reverse the sort order")
+
+
+def _sorted(rows: list[dict], key: str | None, reverse: bool) -> list[dict]:
+    """Rows sorted by `key` (case-insensitive, missing values last); None keeps their order."""
+    if key is None:
+        return rows[::-1] if reverse else rows
+    if rows and key not in rows[0]:
+        raise moodlectlError(f"Cannot sort by {key!r}; choose one of: {', '.join(rows[0])}")
+    present = [r for r in rows if r[key] is not None]
+    present.sort(
+        key=lambda r: r[key].casefold() if isinstance(r[key], str) else r[key],
+        reverse=(key in _CHRONO) != reverse,
+    )
+    return present + [r for r in rows if r[key] is None]
+
+
 @app.command()
 def login(ctx: typer.Context):
     """Log in via SSO in a visible browser (or in the terminal with --headless)."""
@@ -151,10 +181,15 @@ def cache_clear(ctx: typer.Context):
 
 
 @courses.command("list")
-def courses_list(ctx: typer.Context, search: Optional[str] = typer.Option(None, "--search")):
+def courses_list(
+    ctx: typer.Context,
+    search: Optional[str] = typer.Option(None, "--search"),
+    sort: Optional[str] = _sort_option("name"),
+    reverse: bool = _REVERSE,
+):
     """List links from My Courses; --search searches the site course catalogue."""
     with browser(ctx) as moodle:
-        _print([asdict(c) for c in moodle.list_courses(search)])
+        _print(_sorted([asdict(c) for c in moodle.list_courses(search)], sort, reverse))
 
 
 @courses.command("use")
@@ -167,18 +202,27 @@ def courses_use(ctx: typer.Context, course: int):
 
 
 @sections.command("list")
-def sections_list(ctx: typer.Context, course: Optional[int] = typer.Option(None, "--course")):
+def sections_list(
+    ctx: typer.Context,
+    course: Optional[int] = typer.Option(None, "--course"),
+    sort: Optional[str] = _sort_option("number"),
+    reverse: bool = _REVERSE,
+):
     with browser(ctx) as moodle:
         _print(
-            [
-                {
-                    "number": x.number,
-                    "name": x.name,
-                    "section_id": x.section_id,
-                    "resource_count": len(x.resources),
-                }
-                for x in moodle.course_sections(_cid(ctx, course))
-            ]
+            _sorted(
+                [
+                    {
+                        "number": x.number,
+                        "name": x.name,
+                        "section_id": x.section_id,
+                        "resource_count": len(x.resources),
+                    }
+                    for x in moodle.course_sections(_cid(ctx, course))
+                ],
+                sort,
+                reverse,
+            )
         )
 
 
@@ -187,9 +231,12 @@ def resources_list(
     ctx: typer.Context,
     course: Optional[int] = typer.Option(None, "--course"),
     section: Optional[str] = typer.Option(None, "--section"),
+    sort: Optional[str] = _sort_option(None),
+    reverse: bool = _REVERSE,
 ):
     with browser(ctx) as moodle:
-        _print([asdict(r) for r in moodle.list_resources(_cid(ctx, course), section)])
+        rows = [asdict(r) for r in moodle.list_resources(_cid(ctx, course), section)]
+        _print(_sorted(rows, sort, reverse))
 
 
 @resources.command("show")
@@ -305,10 +352,15 @@ def update_url(
 
 
 @forums.command("list")
-def forums_list(ctx: typer.Context, course: Optional[int] = typer.Option(None, "--course")):
+def forums_list(
+    ctx: typer.Context,
+    course: Optional[int] = typer.Option(None, "--course"),
+    sort: Optional[str] = _sort_option(None),
+    reverse: bool = _REVERSE,
+):
     """List the course's forums (their cmid selects them in `discussions` commands)."""
     with browser(ctx) as moodle:
-        _print([asdict(r) for r in moodle.list_forums(_cid(ctx, course))])
+        _print(_sorted([asdict(r) for r in moodle.list_forums(_cid(ctx, course))], sort, reverse))
 
 
 # Which page/query key identifies each kind in a pasted URL, and the command reading it.
@@ -334,11 +386,15 @@ def forum_ref(value: str, kind: str) -> int:
 
 @discussions.command("list")
 def discussions_list(
-    ctx: typer.Context, forum: str = typer.Argument(..., help="Forum cmid or view.php URL")
+    ctx: typer.Context,
+    forum: str = typer.Argument(..., help="Forum cmid or view.php URL"),
+    sort: Optional[str] = _sort_option("modified"),
+    reverse: bool = _REVERSE,
 ):
     """List a forum's discussions, with authors, dates, replies and states."""
     with browser(ctx) as moodle:
-        _print([asdict(d) for d in moodle.list_discussions(forum_ref(forum, "forum"))])
+        rows = [asdict(d) for d in moodle.list_discussions(forum_ref(forum, "forum"))]
+        _print(_sorted(rows, sort, reverse))
 
 
 @discussions.command("show")
@@ -346,11 +402,13 @@ def discussions_show(
     ctx: typer.Context,
     discussion: str = typer.Argument(..., help="Discussion id or discuss.php URL"),
     html: bool = typer.Option(False, "--html", help="Print messages as Moodle's HTML"),
+    sort: Optional[str] = _sort_option(None),
+    reverse: bool = _REVERSE,
 ):
     """Show a discussion's posts (oldest first) with authors, metadata and attachments."""
     ref = forum_ref(discussion, "discussion")
     with browser(ctx) as moodle:
-        _print([asdict(x) for x in moodle.list_posts(ref, html=html)])
+        _print(_sorted([asdict(x) for x in moodle.list_posts(ref, html=html)], sort, reverse))
 
 
 def _text(value: str | None) -> str | None:

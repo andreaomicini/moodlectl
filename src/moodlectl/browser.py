@@ -23,9 +23,12 @@ OWN_ENGINES = ("firefox", "webkit")
 
 
 def auto_browsers() -> tuple[str, ...]:
-    """`--browser auto` order: the closest drivable match to the OS default browser
-    (WebKit for Safari, installed Edge, Playwright's Firefox), then Chromium, then Chrome."""
-    first = {"darwin": "webkit", "win32": "msedge"}.get(sys.platform, "firefox")
+    """`--browser auto` order: the OS default browser where drivable (installed Edge,
+    Playwright's Firefox), then Chromium, then Chrome. macOS skips WebKit (Safari's
+    engine): it rejects the Shibboleth session cookie, so Unibo SSO loops."""
+    if sys.platform == "darwin":
+        return ("chrome", "chromium")
+    first = "msedge" if sys.platform == "win32" else "firefox"
     return (first, "chromium", "chrome")
 
 
@@ -258,9 +261,20 @@ class BrowserMoodle(AbstractContextManager):
             "/course/search.php?" + urlencode({"search": search}) if search else "/my/courses.php"
         )
         p = self._goto(path)
+        # Moodle 4+ renders the My Courses overview via AJAX after page load.
+        try:
+            p.wait_for_load_state("networkidle", timeout=self.timeout_ms)
+        except PWTimeout:
+            pass
         raw = p.eval_on_selector_all(
             'a[href*="/course/view.php?id="]',
-            """els => els.map(a => ({name:(a.textContent||'').trim(), url:a.href}))""",
+            # Drop screen-reader/hidden spans (e.g. "Course is starred") from card links.
+            """els => els.map(a => {
+              const c = a.cloneNode(true);
+              c.querySelectorAll('.sr-only, .visually-hidden, .hidden')
+                .forEach(e => e.remove());
+              return {name: c.textContent.replace(/\\s+/g, ' ').trim(), url: a.href};
+            })""",
         )
         courses: dict[int, Course] = {}
         for item in raw:

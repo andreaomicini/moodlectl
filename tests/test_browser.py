@@ -44,14 +44,19 @@ def _settings(tmp_path, monkeypatch, browser):
 
 
 @pytest.mark.parametrize(
-    "platform, first", [("darwin", "webkit"), ("win32", "msedge"), ("linux", "firefox")]
+    "platform, order",
+    [
+        ("darwin", ["chrome", "chromium"]),
+        ("win32", ["msedge", "chromium", "chrome"]),
+        ("linux", ["firefox", "chromium", "chrome"]),
+    ],
 )
-def test_auto_prefers_os_browser_then_falls_back(tmp_path, monkeypatch, platform, first):
+def test_auto_prefers_os_browser_then_falls_back(tmp_path, monkeypatch, platform, order):
     monkeypatch.setattr(browser_mod.sys, "platform", platform)
-    fake = FakePlaywright(installed={"chrome"})
+    fake = FakePlaywright(installed={order[-1]})
     monkeypatch.setattr(browser_mod, "sync_playwright", lambda: fake)
     with BrowserMoodle(_settings(tmp_path, monkeypatch, "auto")):
-        assert fake.tried == [first, "chromium", "chrome"]
+        assert fake.tried == order
 
 
 def test_explicit_browser_missing_reports_error(tmp_path, monkeypatch):

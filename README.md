@@ -59,8 +59,9 @@ than typing it on the command line).
 | `chromium` | Playwright's Chromium | `playwright install chromium` |
 | `chrome`, `msedge` | the installed Google Chrome / Microsoft Edge | none |
 
-The default, `auto`, tries the closest match to the OS default browser (WebKit
-on macOS, Edge on Windows, Firefox on Linux), then `chromium`, then `chrome`.
+The default, `auto`, tries Edge on Windows and Firefox on Linux, then `chromium`,
+then `chrome`; on macOS it tries `chrome`, then `chromium`. WebKit is not used by
+default: it rejects the Shibboleth session cookie, so Unibo SSO login loops.
 Playwright cannot drive the installed Safari or Firefox apps, only its own
 builds. Each engine keeps its own login session, so log in again after switching
 between engines (Chromium, Chrome and Edge share one).

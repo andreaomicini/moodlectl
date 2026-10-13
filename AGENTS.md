@@ -42,9 +42,10 @@ on ubuntu/windows/macos x Python 3.10-3.13, then the semantic-release deploy.
 
 - Working and unit-tested: manifest loading/validation, table import, config/profile
   handling, REST client and param flattening.
-- Implemented but **not covered by tests and not validated against a live Moodle**:
-  everything in `browser.py` (login, course/section scraping, add/update/inspect
-  forms). Selectors were derived from screenshots of Unibo Virtuale.
+- Validated live on Virtuale but only partly unit-tested (browser selection, session
+  cookies, page cache): login and course/section/resource scraping in `browser.py`.
+- Implemented but **not validated against a live Moodle**: resource add/update/inspect
+  forms. Their selectors were derived from screenshots of Unibo Virtuale.
 - Supported writes: create `url` and `page`, update `url`. Other `kind`s go through
   the generic `modedit.php?add=<kind>` path and need site-specific `fields`.
 - Forums (`list_forums`, `list_discussions`, `list_posts`, `add_discussion`, `reply`,
@@ -55,8 +56,8 @@ on ubuntu/windows/macos x Python 3.10-3.13, then the semantic-release deploy.
   `mod_forum_set_lock_state`'s `targetstate` is the current lock time (0 locks).
   Attachments go to the form's draft itemid via `repository_ajax.php?action=upload`
   (`page.request`, same cookies), repo id scraped from the page's filepicker options.
-- Not implemented: `label` (rejected in `ResourceSpec.validate()`), file uploads,
-  deletion, section creation, access restrictions.
+- Not implemented: `label` (rejected in `ResourceSpec.validate()`), resource file
+  uploads, resource deletion, section creation, access restrictions.
 - `static-checks` and tests pass; keep it that way before committing.
 
 ## Conventions and gotchas

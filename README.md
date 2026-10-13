@@ -1,7 +1,8 @@
 # moodlectl
 
-A Python CLI and reusable API to inspect Moodle courses and manage learning
-resources, including Moodle instances whose users authenticate using a university
+A Python CLI and reusable API to inspect Moodle courses, manage learning
+resources, and read and write forum discussions (posts, replies, attachments),
+including Moodle instances whose users authenticate using a university
 SSO provider (SAML / Shibboleth / OIDC). Designed for Moodle 4.x and 5.x forms.
 
 This is an independent utility, not an official University of Bologna/Moodle integration.
@@ -45,11 +46,13 @@ Without a display (e.g. over SSH), use `moodlectl --headless login`: no window
 opens, and each SSO page is shown in the terminal as text, followed by prompts
 for its fields (passwords via a hidden prompt, never stored) and a numbered list
 of buttons/links to click. Press Enter on a page with no fields to wait, e.g. while
-approving an MFA push. All other commands run headless by default, since they only
-reuse the saved session; pass `--headed` (or `MOODLE_HEADLESS=0`) to watch the browser,
-e.g. when debugging a form. `MOODLE_HEADLESS=1` makes `login` headless too. If `MOODLE_USERNAME` / `MOODLE_PASSWORD` are set, username and password fields
-are filled from them instead of prompting (set the password with `read -s` rather
-than typing it on the command line).
+approving an MFA push. If `MOODLE_USERNAME` / `MOODLE_PASSWORD` are set, username
+and password fields are filled from them instead of prompting (set the password with
+`read -s` rather than typing it on the command line).
+
+All other commands run headless by default, since they only reuse the saved session;
+pass `--headed` (or `MOODLE_HEADLESS=0`) to watch the browser, e.g. when debugging a
+form. `MOODLE_HEADLESS=1` makes `login` headless too.
 
 `--browser` (or `MOODLE_BROWSER`), placed before the subcommand, picks the browser:
 
@@ -68,6 +71,9 @@ builds. Each engine keeps its own login session, so log in again after switching
 between engines (Chromium, Chrome and Edge share one).
 
 ## CLI essentials
+
+Commands print their results as YAML (multi-line texts, such as forum messages, as
+`|` blocks), so they are readable and can be piped to tools like `yq`.
 
 ```bash
 # Read courses from your My Courses view (this view may be paginated)
@@ -114,7 +120,7 @@ moodlectl posts delete 315849                 # asks after showing Moodle's conf
 moodlectl discussions delete 230424           # deletes the whole discussion (same prompt)
 moodlectl discussions set 230424 --lock --pin --favourite --unsubscribe
 
-# Course and section listings are cached per URL for 1h (in the temp dir)
+# Course, section and forum listings are cached per URL for 1h (in the temp dir)
 moodlectl --cache-ttl 600 sections list   # or MOODLE_CACHE_TTL=600
 moodlectl --no-cache sections list        # or MOODLE_NO_CACHE=1; refreshes the cache
 moodlectl cache clear
@@ -241,7 +247,23 @@ with BrowserMoodle(Settings.load()) as moodle:
         ),
     )
     print(status)  # 'created' or 'skipped'
+
+    # Forums -> discussions -> posts (messages as plain text; html=True for Moodle's HTML)
+    for forum in moodle.list_forums(80509):
+        for discussion in moodle.list_discussions(forum.cmid):
+            for post in moodle.list_posts(discussion.id):
+                print(post.author, post.created, post.subject, post.attachments)
+                print(post.message)
+
+    new_post = moodle.reply(315396, "Slides **attached**", attachments=["l1.pdf"])
+    moodle.edit_post(new_post, message="Slides attached (updated)")
+    moodle.set_discussion(230424, pinned=True)
 ```
+
+Write methods mirror the CLI: `add_discussion`, `reply` (its `confirm_similar`
+callback decides on near-duplicate replies; by default it warns and posts),
+`edit_post`, `delete_post` (its `confirm` callback sees Moodle's confirmation text),
+`set_discussion`.
 
 REST usage:
 
@@ -256,9 +278,10 @@ with MoodleREST("https://virtuale.unibo.it") as ws:
 
 ## Limitations and operational notes
 
-* **Not yet validated against an authenticated live Virtuale session**:
-  the UI form/selectors match the supplied screenshots, but Virtuale plugins,
-  roles, Moodle version, and updates can change selectors or permissions.
+* Validated live on Virtuale (Moodle 4.5): login, course/section/resource listings
+  and all forum commands. Resource **writes** (`add-url`, `add-page`, `update-url`,
+  `sync`) match screenshots of the forms but are not yet validated live. Site
+  plugins, roles, Moodle versions and updates can change selectors or permissions.
 * Moodle core REST exposes course reading and module management functions,
   but resource creation is not universally exposed as a generic external
   function. A REST token must be provisioned with adequate functions/capabilities
@@ -282,8 +305,9 @@ uv run poe static-checks
 uv run poe format-check
 ```
 
-Unit tests cover manifest validation, HTML table import, configuration and REST parameter
-serialization. Integration against live Virtuale requires running
+Unit tests cover manifest validation, HTML table import, configuration, REST parameter
+serialization, browser selection, session cookies and page cache, CLI headless defaults,
+forum message rendering, near-duplicate detection and forum URL parsing. Integration against live Virtuale requires running
 `moodlectl login` locally with an authorized account; no stored credentials
 or Moodle tokens are included.
 

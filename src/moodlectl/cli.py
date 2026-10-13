@@ -8,6 +8,7 @@ from dataclasses import asdict
 from typing import Any, Optional, cast
 
 import typer
+import yaml
 
 from .browser import BrowserMoodle
 from .config import Settings, normalized_site
@@ -72,8 +73,8 @@ def browser(ctx: typer.Context):
         yield moodle
 
 
-def _json(value: Any) -> None:
-    typer.echo(json.dumps(value, indent=2, ensure_ascii=False))
+def _print(value: Any) -> None:
+    typer.echo(yaml.safe_dump(value, allow_unicode=True, sort_keys=False, width=1000), nl=False)
 
 
 @app.command()
@@ -87,7 +88,7 @@ def login(ctx: typer.Context):
 @config.command("show")
 def config_show(ctx: typer.Context):
     s = _settings(ctx)
-    _json(
+    _print(
         {
             "site": s.site,
             "profile": s.profile,
@@ -110,7 +111,7 @@ def config_set_site(ctx: typer.Context, url: str):
 def courses_list(ctx: typer.Context, search: Optional[str] = typer.Option(None, "--search")):
     """List links from My Courses; --search searches the site course catalogue."""
     with browser(ctx) as moodle:
-        _json([asdict(c) for c in moodle.list_courses(search)])
+        _print([asdict(c) for c in moodle.list_courses(search)])
 
 
 @courses.command("use")
@@ -125,7 +126,7 @@ def courses_use(ctx: typer.Context, course: int):
 @sections.command("list")
 def sections_list(ctx: typer.Context, course: Optional[int] = typer.Option(None, "--course")):
     with browser(ctx) as moodle:
-        _json(
+        _print(
             [
                 {
                     "number": x.number,
@@ -145,7 +146,7 @@ def resources_list(
     section: Optional[str] = typer.Option(None, "--section"),
 ):
     with browser(ctx) as moodle:
-        _json([asdict(r) for r in moodle.list_resources(_cid(ctx, course), section)])
+        _print([asdict(r) for r in moodle.list_resources(_cid(ctx, course), section)])
 
 
 @resources.command("show")
@@ -156,7 +157,7 @@ def resources_show(
 ):
     """Show the underlying URL and edit-form metadata for a URL activity."""
     with browser(ctx) as moodle:
-        _json(moodle.get_url_details(_cid(ctx, course), cmid))
+        _print(moodle.get_url_details(_cid(ctx, course), cmid))
 
 
 @resources.command("inspect-form")
@@ -168,7 +169,7 @@ def resources_inspect_form(
 ):
     """List Moodle form field names, IDs and options (no write)."""
     with browser(ctx) as moodle:
-        _json(moodle.inspect_form(_cid(ctx, course), section, kind=kind))
+        _print(moodle.inspect_form(_cid(ctx, course), section, kind=kind))
 
 
 @resources.command("add-url")
@@ -293,7 +294,7 @@ def resources_sync(
             }
             for spec in batch.resources
         ]
-        _json({"course": batch.course, "section": sect.name, "apply": apply, "plan": plan})
+        _print({"course": batch.course, "section": sect.name, "apply": apply, "plan": plan})
         if not apply:
             typer.echo("Preview only. Re-run with --apply to create resources.")
             return
@@ -303,10 +304,10 @@ def resources_sync(
             try:
                 outcome = moodle.add_resource(batch.course, sect.number, spec, if_exists=if_exists)
             except Exception:
-                _json({"completed": outcomes, "failed_on": spec.name})
+                _print({"completed": outcomes, "failed_on": spec.name})
                 raise
             outcomes.append({"resource": spec.name, "outcome": outcome})
-        _json({"completed": outcomes})
+        _print({"completed": outcomes})
 
 
 @manifest.command("from-table")
@@ -330,21 +331,21 @@ def api_call(
 ):
     """Call any provisioned Moodle REST function (requires MOODLE_WS_TOKEN)."""
     with MoodleREST(_settings(ctx).site) as ws:
-        _json(ws.call(function, **_parse_json_object(params)))
+        _print(ws.call(function, **_parse_json_object(params)))
 
 
 @api.command("courses")
 def api_courses(ctx: typer.Context):
     """List enrolled courses through native Moodle REST (requires token)."""
     with MoodleREST(_settings(ctx).site) as ws:
-        _json(ws.courses())
+        _print(ws.courses())
 
 
 @api.command("contents")
 def api_contents(ctx: typer.Context, course: Optional[int] = typer.Option(None, "--course")):
     """Read detailed course structure through Moodle REST (requires token)."""
     with MoodleREST(_settings(ctx).site) as ws:
-        _json(ws.course_contents(_cid(ctx, course)))
+        _print(ws.course_contents(_cid(ctx, course)))
 
 
 def main() -> None:

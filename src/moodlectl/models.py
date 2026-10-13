@@ -15,6 +15,7 @@ class Course:
     id: int
     name: str
     url: str
+    academic_year: str | None = None
 
 
 @dataclass(frozen=True)

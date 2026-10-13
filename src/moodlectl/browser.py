@@ -32,6 +32,19 @@ def auto_browsers() -> tuple[str, ...]:
     return (first, "chromium", "chrome")
 
 
+# Academic year ("2025/2026") of enrolled courses, parsed from their category name
+# (e.g. Virtuale's "Anno Accademico 2025/2026"); same AJAX service as My Courses.
+YEARS_JS = r"""async () => {
+ const r = await fetch(M.cfg.wwwroot + '/lib/ajax/service.php?sesskey=' + M.cfg.sesskey, {
+  method: 'POST', body: JSON.stringify([{index: 0,
+   methodname: 'core_course_get_enrolled_courses_by_timeline_classification',
+   args: {offset: 0, limit: 0, classification: 'allincludinghidden', sort: 'fullname'}}])});
+ const [res] = await r.json();
+ return res.error ? [] : res.data.courses.map(c =>
+  [c.id, ((c.coursecategory || '').match(/\d{4}\s*[/-]\s*\d{4}/) || [null])[0]]);
+}"""
+
+
 # Moodle has no universal create-URL external web-service endpoint. Use the
 # supported browser form with a real lecturer SSO session instead.
 SECTION_JS = r"""() => {
@@ -276,6 +289,10 @@ class BrowserMoodle(AbstractContextManager):
               return {name: c.textContent.replace(/\\s+/g, ' ').trim(), url: a.href};
             })""",
         )
+        try:
+            years = dict(p.evaluate(YEARS_JS))
+        except PWError:
+            years = {}
         courses: dict[int, Course] = {}
         for item in raw:
             parsed = urlsplit(item["url"])
@@ -286,7 +303,7 @@ class BrowserMoodle(AbstractContextManager):
                 continue
             cid = int(ids[0])
             if cid not in courses or len(item["name"]) > len(courses[cid].name):
-                courses[cid] = Course(cid, item["name"] or str(cid), item["url"])
+                courses[cid] = Course(cid, item["name"] or str(cid), item["url"], years.get(cid))
         result = sorted(courses.values(), key=lambda c: c.name.casefold())
         return [c for c in result if not search or search.casefold() in c.name.casefold()]
 

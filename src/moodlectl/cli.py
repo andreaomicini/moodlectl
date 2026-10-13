@@ -11,6 +11,10 @@ from urllib.parse import parse_qs, urlsplit
 
 import typer
 import yaml
+from rich.console import Console, Group, RenderableType
+from rich.table import Table
+from rich.text import Text
+from rich.tree import Tree
 
 from .browser import BrowserMoodle
 from .config import Settings, normalized_site
@@ -141,6 +145,64 @@ def _sorted(rows: list[dict], key: str | None, reverse: bool) -> list[dict]:
     return present + [r for r in rows if r[key] is None]
 
 
+_PRETTY = typer.Option(False, "--pretty", help="Human-readable output instead of YAML")
+
+
+def _cell(value: Any) -> Text:
+    if isinstance(value, bool):
+        return Text("✓" if value else "")
+    if isinstance(value, (list, tuple)):
+        return Text(", ".join(map(str, value)))
+    return Text("" if value is None else str(value))
+
+
+def _table(rows: list[dict]) -> RenderableType:
+    if not rows:
+        return Text("Nothing found.", style="dim")
+    table = Table(*rows[0])
+    for row in rows:
+        table.add_row(*map(_cell, row.values()))
+    return table
+
+
+def _post(p: dict) -> Group:
+    header = Text.assemble((p["subject"], "bold"), "\n", "by ", (p["author"], "cyan"))
+    header.append(f" · {p['created']}", style="dim")
+    if p["modified"] != p["created"]:
+        header.append(f" · edited {p['modified']}", style="dim")
+    for flag in ("private", "deleted"):
+        if p[flag]:
+            header.append(f" [{flag}]", style="yellow")
+    header.append(f" #{p['id']}", style="dim")
+    files = [Text(f"📎 {name}", style="blue") for name in p["attachments"]]
+    return Group(header, Text(p["message"]), *files, Text())
+
+
+def _thread(posts: list[dict]) -> RenderableType:
+    """Posts as reply trees, like Moodle's nested view; siblings keep the list's order."""
+    if not posts:
+        return _table(posts)
+    ids = {p["id"] for p in posts}
+    children: dict[int | None, list[dict]] = {}
+    for p in posts:
+        children.setdefault(p["parent"] if p["parent"] in ids else None, []).append(p)
+
+    def tree(p: dict, node: Tree | None = None) -> Tree:
+        node = Tree(_post(p), guide_style="dim") if node is None else node.add(_post(p))
+        for child in children.get(p["id"], []):
+            tree(child, node)
+        return node
+
+    return Group(*(tree(p) for p in children.get(None, [])))
+
+
+def _list(rows: list[dict], pretty: bool, render=_table) -> None:
+    if pretty:
+        Console().print(render(rows))
+    else:
+        _print(rows)
+
+
 @app.command()
 def login(ctx: typer.Context):
     """Log in via SSO in a visible browser (or in the terminal with --headless)."""
@@ -186,10 +248,11 @@ def courses_list(
     search: Optional[str] = typer.Option(None, "--search"),
     sort: Optional[str] = _sort_option("name"),
     reverse: bool = _REVERSE,
+    pretty: bool = _PRETTY,
 ):
     """List links from My Courses; --search searches the site course catalogue."""
     with browser(ctx) as moodle:
-        _print(_sorted([asdict(c) for c in moodle.list_courses(search)], sort, reverse))
+        _list(_sorted([asdict(c) for c in moodle.list_courses(search)], sort, reverse), pretty)
 
 
 @courses.command("use")
@@ -207,9 +270,10 @@ def sections_list(
     course: Optional[int] = typer.Option(None, "--course"),
     sort: Optional[str] = _sort_option("number"),
     reverse: bool = _REVERSE,
+    pretty: bool = _PRETTY,
 ):
     with browser(ctx) as moodle:
-        _print(
+        _list(
             _sorted(
                 [
                     {
@@ -222,7 +286,8 @@ def sections_list(
                 ],
                 sort,
                 reverse,
-            )
+            ),
+            pretty,
         )
 
 
@@ -233,10 +298,11 @@ def resources_list(
     section: Optional[str] = typer.Option(None, "--section"),
     sort: Optional[str] = _sort_option(None),
     reverse: bool = _REVERSE,
+    pretty: bool = _PRETTY,
 ):
     with browser(ctx) as moodle:
         rows = [asdict(r) for r in moodle.list_resources(_cid(ctx, course), section)]
-        _print(_sorted(rows, sort, reverse))
+        _list(_sorted(rows, sort, reverse), pretty)
 
 
 @resources.command("show")
@@ -357,10 +423,14 @@ def forums_list(
     course: Optional[int] = typer.Option(None, "--course"),
     sort: Optional[str] = _sort_option(None),
     reverse: bool = _REVERSE,
+    pretty: bool = _PRETTY,
 ):
     """List the course's forums (their cmid selects them in `discussions` commands)."""
     with browser(ctx) as moodle:
-        _print(_sorted([asdict(r) for r in moodle.list_forums(_cid(ctx, course))], sort, reverse))
+        _list(
+            _sorted([asdict(r) for r in moodle.list_forums(_cid(ctx, course))], sort, reverse),
+            pretty,
+        )
 
 
 # Which page/query key identifies each kind in a pasted URL, and the command reading it.
@@ -390,11 +460,12 @@ def discussions_list(
     forum: str = typer.Argument(..., help="Forum cmid or view.php URL"),
     sort: Optional[str] = _sort_option("modified"),
     reverse: bool = _REVERSE,
+    pretty: bool = _PRETTY,
 ):
     """List a forum's discussions, with authors, dates, replies and states."""
     with browser(ctx) as moodle:
         rows = [asdict(d) for d in moodle.list_discussions(forum_ref(forum, "forum"))]
-        _print(_sorted(rows, sort, reverse))
+        _list(_sorted(rows, sort, reverse), pretty)
 
 
 @discussions.command("show")
@@ -404,11 +475,13 @@ def discussions_show(
     html: bool = typer.Option(False, "--html", help="Print messages as Moodle's HTML"),
     sort: Optional[str] = _sort_option(None),
     reverse: bool = _REVERSE,
+    pretty: bool = _PRETTY,
 ):
     """Show a discussion's posts (oldest first) with authors, metadata and attachments."""
     ref = forum_ref(discussion, "discussion")
     with browser(ctx) as moodle:
-        _print(_sorted([asdict(x) for x in moodle.list_posts(ref, html=html)], sort, reverse))
+        rows = [asdict(x) for x in moodle.list_posts(ref, html=html)]
+        _list(_sorted(rows, sort, reverse), pretty, _thread)
 
 
 def _text(value: str | None) -> str | None:

@@ -56,3 +56,21 @@ def test_sorted_defaults_and_errors():
     assert cli._sorted(rows, None, True) == rows[::-1]
     with pytest.raises(cli.moodlectlError, match="choose one of: name, modified"):
         cli._sorted(rows, "nope", False)
+
+
+def test_pretty_thread_indents_replies():
+    from dataclasses import asdict
+
+    from rich.console import Console
+
+    from moodlectl.models import Post
+
+    def post(id, parent, message):
+        when = "2026-10-01T10:00+02:00"
+        return asdict(Post(id, 1, parent, f"s{id}", f"a{id}", when, when, message))
+
+    console = Console(width=60, record=True)
+    console.print(cli._thread([post(1, None, "root"), post(2, 1, "reply"), post(3, 2, "deep")]))
+    lines = console.export_text().splitlines()
+    indent = {m: next(ln for ln in lines if m in ln).index(m) for m in ("root", "reply", "deep")}
+    assert indent["root"] < indent["reply"] < indent["deep"]

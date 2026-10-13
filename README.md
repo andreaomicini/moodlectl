@@ -109,6 +109,8 @@ Commands print their results as YAML (multi-line texts, such as forum messages, 
 Listings accept `--sort KEY` (any key of the listed items) and `--reverse`. Dates sort
 most recent first. Defaults: courses by `name`, sections by `number`, discussions by
 `modified`; resources and forums stay in page order, posts in chronological order.
+Add `--pretty` for human-readable output: tables, and for `discussions show` the
+conversation as an indented reply tree with author/date headers.
 
 ```bash
 # Read courses from your My Courses view (this view may be paginated)

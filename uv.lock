@@ -572,6 +572,7 @@ dependencies = [
     { name = "httpx" },
     { name = "playwright" },
     { name = "pyyaml" },
+    { name = "rich" },
     { name = "typer" },
 ]
 
@@ -599,6 +600,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8,<10" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5,<8" },
     { name = "pyyaml", specifier = ">=6,<7" },
+    { name = "rich", specifier = ">=13,<16" },
     { name = "typer", specifier = ">=0.12,<1" },
 ]
 provides-extras = ["test"]

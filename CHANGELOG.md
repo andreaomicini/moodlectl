@@ -1,3 +1,14 @@
+## [1.1.1](https://github.com/gciatto/moodlectl/compare/1.1.0...1.1.1) (2026-10-15)
+
+### Bug Fixes
+
+* drop screen-reader-only text from scraped resource names ([3dca91e](https://github.com/gciatto/moodlectl/commit/3dca91e52bbe5c22e1c5be58c82f7de383722685))
+* match the show-description checkbox, not the hidden input with the same name ([06de2c2](https://github.com/gciatto/moodlectl/commit/06de2c288791dc8b9a82ad23161efa1365c14484))
+
+### Style improvements
+
+* format browser.py ([70e2a9f](https://github.com/gciatto/moodlectl/commit/70e2a9f2b60195728687defbbc51cac1b8ebd911))
+
 ## [1.1.0](https://github.com/gciatto/moodlectl/compare/1.0.0...1.1.0) (2026-10-13)
 
 ### Features

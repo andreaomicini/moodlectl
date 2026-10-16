@@ -38,7 +38,20 @@ _spec.loader.exec_module(githooks)
 def test_check_msg(tmp_path, message, ok):
     file = tmp_path / "MSG"
     file.write_text(message)
-    assert (githooks.check_msg(str(file)) == 0) is ok
+    assert (githooks.check_msg(str(file)) == githooks.check_ai(str(file)) == 0) is ok
+
+
+def test_hooks_sharing_commit_msg_install_separately(tmp_path, monkeypatch):
+    monkeypatch.setattr(githooks, "hooks_dir", lambda: tmp_path)
+    hook = tmp_path / "commit-msg"
+    assert githooks.main(["install", "no-ai-signature"]) == 0
+    assert githooks.installed(hook) == {"no-ai-signature"}
+    assert githooks.main(["install", "conventional-commits"]) == 0
+    assert githooks.installed(hook) == {"no-ai-signature", "conventional-commits"}
+    assert "check-ai" in hook.read_text() and "check-msg" in hook.read_text()
+    assert githooks.main(["uninstall", "no-ai-signature"]) == 0
+    assert githooks.installed(hook) == {"conventional-commits"}
+    assert "check-ai" not in hook.read_text()
 
 
 def test_install_uninstall_leave_foreign_hooks(tmp_path, monkeypatch):

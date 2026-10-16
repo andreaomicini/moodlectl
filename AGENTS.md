@@ -39,10 +39,11 @@ uv run poe install-hooks [HOOK...]    # local hooks in .git/hooks (default: all)
 uv run poe uninstall-hooks [HOOK...]  # removes only hooks it installed
 ```
 
-Hooks (`scripts/githooks.py`, never tracked): `pre-commit` runs static-checks, `commit-msg`
-rejects non-Conventional-Commit subjects and AI assistants' signatures (Claude, Codex,
-Copilot, ... trailers or "Generated with" footers), `pre-push` runs static-checks + tests. Existing
-foreign hooks are never overwritten. `--no-verify` skips them once.
+Hooks (`scripts/githooks.py`, never tracked): `pre-commit` runs static-checks,
+`conventional-commits` rejects non-Conventional-Commit subjects, `no-ai-signature` rejects
+AI assistants' signatures (Claude, Codex, Copilot, ... trailers or "Generated with" footers),
+`pre-push` runs static-checks + tests. The two message checks share `.git/hooks/commit-msg`,
+one tagged line each. Foreign hooks are never overwritten. `--no-verify` skips them once.
 
 CI (`.github/workflows/check.yml`) runs static-checks + coverage on 3.12, then tests
 on ubuntu/windows/macos x Python 3.10-3.13, then the semantic-release deploy.

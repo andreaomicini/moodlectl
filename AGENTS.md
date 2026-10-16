@@ -21,7 +21,9 @@ src/moodlectl/
   config.py     Settings per profile (XDG paths, 0600/0700 perms), normalized_site().
   errors.py     moodlectlError (sic, lowercase) and subclasses LoginRequired,
                 AmbiguousMatch, MoodleFormError.
-tests/          pytest unit tests: browser, cli, config, forums, importers, manifest, rest.
+tests/          pytest unit tests: browser, cli, config, files, forums, githooks, importers,
+                manifest, move, rest.
+scripts/        githooks.py: installs/removes local Git hooks (poe install-hooks).
 examples/       module2.yaml manifest and python_api.py (writes are commented out).
 ```
 
@@ -33,7 +35,13 @@ uv run poe test               # pytest
 uv run poe static-checks      # compileall, ruff format --check, ruff check, mypy
 uv run poe static-fixes       # ruff --fix + ruff format
 uv run poe coverage && uv run poe coverage-report
+uv run poe install-hooks [HOOK...]    # local hooks in .git/hooks (default: all)
+uv run poe uninstall-hooks [HOOK...]  # removes only hooks it installed
 ```
+
+Hooks (`scripts/githooks.py`, never tracked): `pre-commit` runs static-checks, `commit-msg`
+rejects non-Conventional-Commit subjects, `pre-push` runs static-checks + tests. Existing
+foreign hooks are never overwritten. `--no-verify` skips them once.
 
 CI (`.github/workflows/check.yml`) runs static-checks + coverage on 3.12, then tests
 on ubuntu/windows/macos x Python 3.10-3.13, then the semantic-release deploy.

@@ -51,10 +51,13 @@ ruff-check = "ruff check"
 ruff-fix = "ruff check --fix"
 format = "ruff format"
 format-check = "ruff format --check"
-mypy = "mypy src tests --ignore-missing-imports"
-compile = "python -m compileall -q src tests"
+mypy = "mypy src tests scripts --ignore-missing-imports"
+compile = "python -m compileall -q src tests scripts"
 static-checks = ["compile", "format-check", "ruff-check", "mypy"]
 static-fixes = ["ruff-fix", "format"]
+# Local, untracked Git hooks; append hook names to pick some (pre-commit, commit-msg, pre-push)
+install-hooks = "python scripts/githooks.py install"
+uninstall-hooks = "python scripts/githooks.py uninstall"
 
 [[tool.uv.index]]
 name = "testpypi"

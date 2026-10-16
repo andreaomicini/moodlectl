@@ -1,0 +1,46 @@
+import importlib.util
+from pathlib import Path
+
+import pytest
+
+_spec = importlib.util.spec_from_file_location(
+    "githooks", Path(__file__).parents[1] / "scripts" / "githooks.py"
+)
+assert _spec and _spec.loader
+githooks = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(githooks)
+
+
+@pytest.mark.parametrize(
+    "message,ok",
+    [
+        ("feat: move modules", True),
+        ("fix(browser)!: drop hidden text\n\nbody", True),
+        ("# comment\n\nchore(deps): bump ruff", True),
+        ("Merge branch 'main'", True),
+        ("fixup! feat: x", True),
+        ("update stuff", False),
+        ("feat:missing space", False),
+        ("feature: not a type", False),
+        ("", False),
+    ],
+)
+def test_check_msg(tmp_path, message, ok):
+    file = tmp_path / "MSG"
+    file.write_text(message)
+    assert (githooks.check_msg(str(file)) == 0) is ok
+
+
+def test_install_uninstall_leave_foreign_hooks(tmp_path, monkeypatch):
+    monkeypatch.setattr(githooks, "hooks_dir", lambda: tmp_path)
+    (tmp_path / "pre-push").write_text("#!/bin/sh\necho mine\n")
+    assert githooks.main(["install"]) == 1
+    assert githooks.is_ours(tmp_path / "pre-commit")
+    assert githooks.is_ours(tmp_path / "commit-msg")
+    assert not githooks.is_ours(tmp_path / "pre-push")
+    assert githooks.main(["uninstall", "pre-commit"]) == 0
+    assert not (tmp_path / "pre-commit").exists()
+    assert githooks.main(["uninstall"]) == 0
+    assert not (tmp_path / "commit-msg").exists()
+    assert (tmp_path / "pre-push").read_text() == "#!/bin/sh\necho mine\n"
+    assert githooks.main(["install", "nope"]) == 2

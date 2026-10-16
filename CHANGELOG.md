@@ -1,3 +1,24 @@
+## [1.2.0](https://github.com/gciatto/moodlectl/compare/1.1.1...1.2.0) (2026-10-16)
+
+### Features
+
+* move modules within a course ([35c8a8d](https://github.com/gciatto/moodlectl/commit/35c8a8d4d6c76853529e021c15e51cc71a131425))
+* upload and replace File resources ([6f01e04](https://github.com/gciatto/moodlectl/commit/6f01e040e7623ade7b74c7a9930a38b339739a7e))
+
+### Bug Fixes
+
+* read and print commit messages as UTF-8 on Windows ([a311262](https://github.com/gciatto/moodlectl/commit/a3112624e29277b454784a629e2ccbfea1d4b302))
+
+### General maintenance
+
+* add poe tasks to install and uninstall local git hooks ([2da2caa](https://github.com/gciatto/moodlectl/commit/2da2caaa8658a5986182663ac176309900d91322)), closes [#9](https://github.com/gciatto/moodlectl/issues/9) [#10](https://github.com/gciatto/moodlectl/issues/10)
+* make the AI-signature check a separately installable hook ([1751ace](https://github.com/gciatto/moodlectl/commit/1751acef108ae8565a1d26cd7a8791250fb24751))
+* reject AI assistants' signatures in commit messages ([7c91977](https://github.com/gciatto/moodlectl/commit/7c919773f102f6a30afb3070a1e19c77e238e173))
+
+### Style improvements
+
+* format browser.py ([8c1cb97](https://github.com/gciatto/moodlectl/commit/8c1cb97af0f9d93e4ee51d8872a18d8d186caf77))
+
 ## [1.1.1](https://github.com/gciatto/moodlectl/compare/1.1.0...1.1.1) (2026-10-15)
 
 ### Bug Fixes

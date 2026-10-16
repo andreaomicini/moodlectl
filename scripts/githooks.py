@@ -8,6 +8,7 @@ Several hooks may share one Git hook file (e.g. commit-msg); each is a tagged li
 
 from __future__ import annotations
 
+import io
 import re
 import stat
 import subprocess
@@ -116,6 +117,8 @@ def check_msg(file: str) -> int:
 
 
 def main(argv: list[str]) -> int:
+    if isinstance(sys.stderr, io.TextIOWrapper):  # e.g. cp1252 consoles can't print emoji
+        sys.stderr.reconfigure(errors="backslashreplace")
     if len(argv) == 2 and argv[0] in ("check-msg", "check-ai"):
         return (check_msg if argv[0] == "check-msg" else check_ai)(argv[1])
     if not argv or argv[0] not in ("install", "uninstall"):

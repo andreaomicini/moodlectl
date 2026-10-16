@@ -37,7 +37,7 @@ _spec.loader.exec_module(githooks)
 )
 def test_check_msg(tmp_path, message, ok):
     file = tmp_path / "MSG"
-    file.write_text(message)
+    file.write_text(message, encoding="utf-8")
     assert (githooks.check_msg(str(file)) == githooks.check_ai(str(file)) == 0) is ok
 
 

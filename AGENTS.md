@@ -40,7 +40,8 @@ uv run poe uninstall-hooks [HOOK...]  # removes only hooks it installed
 ```
 
 Hooks (`scripts/githooks.py`, never tracked): `pre-commit` runs static-checks, `commit-msg`
-rejects non-Conventional-Commit subjects, `pre-push` runs static-checks + tests. Existing
+rejects non-Conventional-Commit subjects and AI assistants' signatures (Claude, Codex,
+Copilot, ... trailers or "Generated with" footers), `pre-push` runs static-checks + tests. Existing
 foreign hooks are never overwritten. `--no-verify` skips them once.
 
 CI (`.github/workflows/check.yml`) runs static-checks + coverage on 3.12, then tests

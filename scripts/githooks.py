@@ -22,6 +22,15 @@ TYPES = "build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test"
 CONVENTIONAL = re.compile(rf"^({TYPES})(\([^()\s][^()]*\))?!?: \S")
 # Messages git writes itself (merges, reverts, autosquash) are let through.
 EXEMPT = re.compile(r"^(Merge |Revert \"|fixup! |squash! |amend! )")
+# AI assistants' trailers and footers; a plain mention of a tool in the text is fine.
+AI = r"claude|anthropic|codex|openai|chatgpt|gpt-?\d|copilot|gemini|cursor|aider|devin"
+AI_SIGNATURE = re.compile(
+    rf"^\s*(co-authored-by|signed-off-by|assisted-by|generated-by):.*\b({AI})\b"
+    rf"|generated (with|by)\b.*\b({AI})\b"
+    r"|noreply@(anthropic|openai)\.com",
+    re.IGNORECASE,
+)
+SCISSORS = "# ------------------------ >8 ------------------------"
 
 
 def hooks_dir() -> Path:
@@ -66,8 +75,15 @@ def uninstall(names: list[str]) -> int:
 
 
 def check_msg(file: str) -> int:
-    lines = Path(file).read_text(encoding="utf-8").splitlines()
-    subject = next((s for s in lines if s.strip() and not s.startswith("#")), "")
+    text = Path(file).read_text(encoding="utf-8").split(SCISSORS)[0]  # drop `commit -v` diff
+    lines = [s for s in text.splitlines() if not s.startswith("#")]
+    signed = [s for s in lines if AI_SIGNATURE.search(s)]
+    if signed:
+        print(
+            "commit-msg: remove the AI assistant signature:", *signed, sep="\n  ", file=sys.stderr
+        )
+        return 1
+    subject = next((s for s in lines if s.strip()), "")
     if CONVENTIONAL.match(subject) or EXEMPT.match(subject):
         return 0
     print(

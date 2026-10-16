@@ -479,9 +479,7 @@ class BrowserMoodle(AbstractContextManager):
         return p.evaluate(SECTION_JS)
 
     def course_sections(self, course_id: int) -> list[Section]:
-        raw: list[dict] = self._scrape(
-            f"/course/view.php?id={int(course_id)}", self._sections_of
-        )
+        raw: list[dict] = self._scrape(f"/course/view.php?id={int(course_id)}", self._sections_of)
         if not raw:
             raise moodlectlError("Cannot find Moodle course sections; check course access/layout")
         return [
